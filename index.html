@@ -53,12 +53,13 @@ let isSneaking=false,sneakAnim=0;
 let gameTime=0,isNight=false,ctrlPressed=false,dayLight=1;
 let loadingPhase='download',downloadProgress=0,downloadTotal=0,animalSpawnTimer=0;
 let logVisible=false,frameCount=0,lastFpsTime=0,fps=60;
+let inventoryBarHidden=false;
 const touchActive={};
 let touchButtons={},phoneActiveButton=null;
 const doorStates=new Map();
 const activeTouchMap={};
 
-/* ===== 音效（Web Audio API 合成，不依赖任何外部文件） ===== */
+/* ===== 音效（Web Audio API 合成） ===== */
 let audioCtx=null;
 function ensureAudioCtx(){
   if(!audioCtx){
@@ -678,6 +679,8 @@ document.addEventListener('keydown',e=>{
     if(showInGameMenu)return;
     if(key==='q'&&!e.repeat){if(showInventory||showCraftingTable||showFurnace)return;dropSelectedItem();return;}
     if(key==='e'&&!e.repeat){if(showInventory||showCraftingTable||showFurnace){showInventory=false;showCraftingTable=false;showFurnace=false;}else showInventory=true;}
+    /* ★ H 键切换物品栏显示/隐藏 */
+    if(key==='h'&&!e.repeat){inventoryBarHidden=!inventoryBarHidden;return;}
     if(e.key>='1'&&e.key<='9'&&!e.repeat){const n=parseInt(e.key)-1;const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=r*INV_COLS+n;}
     if(key==='z'&&!e.repeat){const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=((r-1+INV_ROWS)%INV_ROWS)*INV_COLS;}
     if(key==='x'&&!e.repeat){const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=((r+1)%INV_ROWS)*INV_COLS;}
@@ -861,10 +864,13 @@ function handleTouchGame(mx,my){
     return;
   }
 
-  const bar=getInventoryBarRect();
-  if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
-    const slot=getSlotAtPoint(mx,my);
-    if(slot>=0){selectedSlot=slot;return;}
+  /* ★ 物品栏隐藏时不响应点击物品栏 */
+  if(!inventoryBarHidden){
+    const bar=getInventoryBarRect();
+    if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
+      const slot=getSlotAtPoint(mx,my);
+      if(slot>=0){selectedSlot=slot;return;}
+    }
   }
 
   phoneWorldDown(mx,my);
@@ -905,14 +911,12 @@ function handleTouchMenu(mx,my,ox){
   }
 }
 
-/* ★ 处理手机模式功能按钮（背包按钮点击即切换，不保持按下） */
 function handlePhoneButtonPress(btnName,touchId){
   if(btnName==='menu'){
     showInGameMenu=true;
     return;
   }
   if(btnName==='inventory'){
-    // 切换背包：打开背包时关闭其他 UI，反之打开背包
     if(showInventory){
       showInventory=false;
     }else{
@@ -922,7 +926,10 @@ function handlePhoneButtonPress(btnName,touchId){
     }
     return;
   }
-  // 其他移动按钮：保持按下状态
+  if(btnName==='hideInv'){
+    inventoryBarHidden=!inventoryBarHidden;
+    return;
+  }
   touchActive[btnName]=true;
   if(touchId!==undefined)activeTouchMap[touchId]=btnName;
   else phoneActiveButton=btnName;
@@ -941,7 +948,7 @@ canvas.addEventListener('touchstart',e=>{
       const btnName=hitTestTouchButtons(mx,my);
       if(btnName){
         handlePhoneButtonPress(btnName,t.identifier);
-        if(btnName==='menu'||btnName==='inventory'){
+        if(btnName==='menu'||btnName==='inventory'||btnName==='hideInv'){
           touchActive[btnName]=false;
         }
         continue;
@@ -1082,7 +1089,7 @@ canvas.addEventListener('mousedown',e=>{
     const btnName=hitTestTouchButtons(mx,my);
     if(btnName){
       handlePhoneButtonPress(btnName);
-      if(btnName==='menu'||btnName==='inventory'){
+      if(btnName==='menu'||btnName==='inventory'||btnName==='hideInv'){
         touchActive[btnName]=false;
         phoneActiveButton=null;
       }
@@ -1178,7 +1185,8 @@ canvas.addEventListener('mousedown',e=>{
     }
     if(showFurnace)return;
   }
-  if(e.button===0){
+  /* ★ 物品栏隐藏时不响应鼠标点击物品栏格子 */
+  if(e.button===0 && !inventoryBarHidden){
     const bar=getInventoryBarRect();
     if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
       const slot=getSlotAtPoint(mx,my);
@@ -1257,6 +1265,8 @@ canvas.addEventListener('mouseup',e=>{
   if(!dragging)return;
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  /* 若物品栏隐藏，松手时把物品放回原位 */
+  if(inventoryBarHidden){inventory[dragging.fromSlot]=dragging.item;dragging=null;return;}
   const target=getSlotAtPoint(mx,my);
   if(target>=0&&target!==dragging.fromSlot){
     const ti=inventory[target];
@@ -1659,6 +1669,8 @@ function drawHealth(){
   }
 }
 function drawInventoryBar(){
+  /* ★ 物品栏隐藏时不绘制 */
+  if(inventoryBarHidden)return;
   const bar=getInventoryBarRect();
   ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(bar.x,bar.y,bar.w,bar.h);
   ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.lineWidth=2;ctx.strokeRect(bar.x,bar.y,bar.w,bar.h);
@@ -1790,6 +1802,7 @@ function drawTouchControls(){
     sprint:{x:canvas.width-160,y:canvas.height-120,w:60,h:60},
     jump:{x:canvas.width-80,y:canvas.height-120,w:60,h:60},
     inventory:{x:canvas.width-80,y:canvas.height-200,w:60,h:60},
+    hideInv:{x:canvas.width-160,y:canvas.height-200,w:60,h:60},
     menu:{x:canvas.width/2-25,y:20,w:50,h:50}};
   ctx.save();
   for(const name in touchButtons){
@@ -1797,8 +1810,9 @@ function drawTouchControls(){
     let active=touchActive[name];
     if(name==='up')active=active||touchActive['jump'];
     if(name==='down')active=active||touchActive['sneak'];
-    // 背包按钮：打开时高亮显示
     if(name==='inventory')active=showInventory;
+    /* ★ 隐藏按钮：物品栏隐藏时高亮显示 */
+    if(name==='hideInv')active=inventoryBarHidden;
     ctx.globalAlpha=active?0.7:0.4;
     ctx.fillStyle=active?'#fff':'#000';
     ctx.beginPath();ctx.arc(btn.x+btn.w/2,btn.y+btn.h/2,btn.w/2,0,Math.PI*2);ctx.fill();
@@ -1810,6 +1824,7 @@ function drawTouchControls(){
     else if(name==='jump')sym='⬆';else if(name==='sneak')sym='⬇';
     else if(name==='sprint')sym='»';
     else if(name==='inventory')sym='包';
+    else if(name==='hideInv')sym='↕';
     else if(name==='menu')sym='三';
     ctx.fillText(sym,btn.x+btn.w/2,btn.y+btn.h/2);
   }
@@ -1870,6 +1885,7 @@ function drawLog(){
     '游戏状态: '+gameState,
     '创造模式: '+(player.creativeMode?'是':'否'),
     '手机模式: '+(phoneMode?'是':'否'),
+    '物品栏: '+(inventoryBarHidden?'隐藏':'显示'),
     '背包物品: '+inventory.filter(x=>x).length+'/'+INVENTORY_SIZE,
     '门状态: '+doorStates.size,
     '',
