@@ -59,6 +59,16 @@ let touchButtons={},phoneActiveButton=null;
 const doorStates=new Map();
 const activeTouchMap={};
 
+/* ★ 双击冲刺状态 */
+let lastLeftTapTime=0;
+let lastRightTapTime=0;
+const DOUBLE_TAP_MS=300;
+
+/* ★ logo 像素揭示动画 */
+let logoRevealCache=null;
+let logoRevealCacheW=0,logoRevealCacheH=0;
+let logoRevealProgress=0;
+
 /* ===== 音效（Web Audio API 合成） ===== */
 let audioCtx=null;
 function ensureAudioCtx(){
@@ -68,18 +78,14 @@ function ensureAudioCtx(){
       if(AC)audioCtx=new AC();
     }catch(e){audioCtx=null;}
   }
-  if(audioCtx&&audioCtx.state==='suspended'){
-    try{audioCtx.resume();}catch(e){}
-  }
+  if(audioCtx&&audioCtx.state==='suspended'){try{audioCtx.resume();}catch(e){}}
   return audioCtx;
 }
 function playBtnSound(){
-  const ac=ensureAudioCtx();
-  if(!ac)return;
+  const ac=ensureAudioCtx();if(!ac)return;
   try{
     const now=ac.currentTime;
-    const osc=ac.createOscillator();
-    const gain=ac.createGain();
+    const osc=ac.createOscillator();const gain=ac.createGain();
     osc.type='square';
     osc.frequency.setValueAtTime(950,now);
     osc.frequency.exponentialRampToValueAtTime(430,now+0.05);
@@ -90,8 +96,7 @@ function playBtnSound(){
   }catch(e){}
 }
 function playPlaceSound(){
-  const ac=ensureAudioCtx();
-  if(!ac)return;
+  const ac=ensureAudioCtx();if(!ac)return;
   try{
     const now=ac.currentTime,dur=0.14;
     const bufSize=Math.floor(ac.sampleRate*dur);
@@ -119,8 +124,7 @@ function playPlaceSound(){
   }catch(e){}
 }
 function playBreakSound(){
-  const ac=ensureAudioCtx();
-  if(!ac)return;
+  const ac=ensureAudioCtx();if(!ac)return;
   try{
     const now=ac.currentTime,dur=0.2;
     const bufSize=Math.floor(ac.sampleRate*dur);
@@ -202,7 +206,8 @@ const SPECIAL_ITEM_URLS={
   [ITEM.COOKED_CHICKEN]:'https://zh.minecraft.wiki/images/Cooked_Chicken_JE2_BE2.png'};
 const STEVE_URL='https://zh.minecraft.wiki/images/thumb/Steve_JE5.png/111px-Steve_JE5.png?0b84d';
 const HEART_URL='https://zh.minecraft.wiki/images/Heart_%28icon%29.png?16571';
-const LOGO_URL='https://message.biliimg.com/bfs/im_new/a00cb80d273202d21b23c6925e8f9e5e3706941259910054.png';
+/* ★ logo 换成新链接 */
+const LOGO_URL='https://zh.minecraft.wiki/images/Minecraft_logo_2.svg?22b32';
 const LOADING_BG_URL='https://zh.minecraft.wiki/images/thumb/End_Poem_background_JE2.png/214px-End_Poem_background_JE2.png?5e829';
 const MENU_BG_URL=LOADING_BG_URL;
 const SHEEP_URL='https://zh.minecraft.wiki/images/thumb/White_Sheep_JE6.png/160px-White_Sheep_JE6.png?ccbd6';
@@ -243,7 +248,6 @@ const DONE_BTN={x:0,y:0,w:200,h:44};
 const NAME_INPUT={x:0,y:0,w:400,h:44};
 const SEED_INPUT={x:0,y:0,w:400,h:44};
 const SAVE_INPUT={x:0,y:0,w:500,h:140};
-/* ★ 粘贴按钮位置（动态计算，初始为 0） */
 const NAME_PASTE_BTN={x:0,y:0,w:88,h:44};
 const SEED_PASTE_BTN={x:0,y:0,w:88,h:44};
 const SAVE_PASTE_BTN={x:0,y:0,w:100,h:36};
@@ -253,13 +257,10 @@ function decodeSave(c){try{return JSON.parse(decodeURIComponent(escape(atob(c.tr
 function easeOutCubic(t){return 1-Math.pow(1-t,3);}
 function lerpColor(c1,c2,t){return[Math.round(c1[0]+(c2[0]-c1[0])*t),Math.round(c1[1]+(c2[1]-c1[1])*t),Math.round(c1[2]+(c2[2]-c1[2])*t)];}
 
-/* ===== ★ 手机端粘贴辅助 ===== */
 async function doPasteToInput(target){
   let text='';
   try{
-    if(navigator.clipboard && navigator.clipboard.readText){
-      text = await navigator.clipboard.readText();
-    }
+    if(navigator.clipboard && navigator.clipboard.readText){text = await navigator.clipboard.readText();}
   }catch(e){ text=''; }
   if(!text){
     try{ text = window.prompt('请粘贴内容：','')||''; }catch(e){ text=''; }
@@ -269,15 +270,13 @@ async function doPasteToInput(target){
     text=text.replace(/[\x00-\x1f\x7f]/g,'');
     if(nameInputText.length+text.length>16)text=text.slice(0,16-nameInputText.length);
     nameInputText+=text;
-  }else if(target==='save'){
-    saveCodeInputText+=text;
-  }else if(target==='seed'){
+  }else if(target==='save'){saveCodeInputText+=text;}
+  else if(target==='seed'){
     text=text.replace(/[^0-9\-]/g,'');
     if(seedInputText.length+text.length>20)text=text.slice(0,20-seedInputText.length);
     seedInputText+=text;
   }
 }
-/* 绘制通用粘贴按钮 */
 function drawPasteButton(btn,active){
   ctx.fillStyle=active?'#5a8a5a':'#4a6a8a';
   ctx.fillRect(btn.x,btn.y,btn.w,btn.h);
@@ -880,14 +879,10 @@ function handleTouchGame(mx,my){
   }
   phoneWorldDown(mx,my);
 }
-/* ★ 手机端菜单触摸：包含粘贴按钮检测 */
 function handleTouchMenu(mx,my,ox){
   const mmx=mx-ox;
   if(showNameEditor){
-    /* ★ 粘贴按钮 */
-    if(pointInRect(mmx,my,NAME_PASTE_BTN.x,NAME_PASTE_BTN.y,NAME_PASTE_BTN.w,NAME_PASTE_BTN.h)){
-      doPasteToInput('name');return;
-    }
+    if(pointInRect(mmx,my,NAME_PASTE_BTN.x,NAME_PASTE_BTN.y,NAME_PASTE_BTN.w,NAME_PASTE_BTN.h)){doPasteToInput('name');return;}
     if(pointInRect(mmx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h)){
       if(nameInputText.trim().length>0){playerName=nameInputText.trim();localStorage.setItem('mc2d_name',playerName);}
       showNameEditor=false;
@@ -900,19 +895,13 @@ function handleTouchMenu(mx,my,ox){
     return;
   }
   if(gameState==='createWorld'){
-    /* ★ 粘贴按钮 */
-    if(pointInRect(mmx,my,SEED_PASTE_BTN.x,SEED_PASTE_BTN.y,SEED_PASTE_BTN.w,SEED_PASTE_BTN.h)){
-      doPasteToInput('seed');return;
-    }
+    if(pointInRect(mmx,my,SEED_PASTE_BTN.x,SEED_PASTE_BTN.y,SEED_PASTE_BTN.w,SEED_PASTE_BTN.h)){doPasteToInput('seed');return;}
     if(pointInRect(mmx,my,MENU_BUTTONS.createOk.x,MENU_BUTTONS.createOk.y,MENU_BUTTONS.createOk.w,MENU_BUTTONS.createOk.h))createWorldFromSeed();
     if(pointInRect(mmx,my,MENU_BUTTONS.createBack.x,MENU_BUTTONS.createBack.y,MENU_BUTTONS.createBack.w,MENU_BUTTONS.createBack.h)){gameState='saves';menuSlide=0;}
     return;
   }
   if(gameState==='saves'){
-    /* ★ 粘贴按钮 */
-    if(pointInRect(mmx,my,SAVE_PASTE_BTN.x,SAVE_PASTE_BTN.y,SAVE_PASTE_BTN.w,SAVE_PASTE_BTN.h)){
-      doPasteToInput('save');return;
-    }
+    if(pointInRect(mmx,my,SAVE_PASTE_BTN.x,SAVE_PASTE_BTN.y,SAVE_PASTE_BTN.w,SAVE_PASTE_BTN.h)){doPasteToInput('save');return;}
     if(pointInRect(mmx,my,MENU_BUTTONS.loadSave.x,MENU_BUTTONS.loadSave.y,MENU_BUTTONS.loadSave.w,MENU_BUTTONS.loadSave.h)){tryLoadSaveCode();return;}
     if(pointInRect(mmx,my,MENU_BUTTONS.newWorld.x,MENU_BUTTONS.newWorld.y,MENU_BUTTONS.newWorld.w,MENU_BUTTONS.newWorld.h)){seedInputText='';gameState='createWorld';menuSlide=0;return;}
     if(pointInRect(mmx,my,MENU_BUTTONS.back.x,MENU_BUTTONS.back.y,MENU_BUTTONS.back.w,MENU_BUTTONS.back.h)){gameState='menu';menuSlide=0;return;}
@@ -925,6 +914,7 @@ function handleTouchMenu(mx,my,ox){
     return;
   }
 }
+/* ★ 手机按钮：双击左/右触发疾跑 */
 function handlePhoneButtonPress(btnName,touchId){
   if(btnName==='menu'){showInGameMenu=true;return;}
   if(btnName==='inventory'){
@@ -933,6 +923,15 @@ function handlePhoneButtonPress(btnName,touchId){
     return;
   }
   if(btnName==='hideInv'){inventoryBarHidden=!inventoryBarHidden;return;}
+  if(btnName==='left'||btnName==='right'){
+    const now=Date.now();
+    const lastTap=btnName==='left'?lastLeftTapTime:lastRightTapTime;
+    if(now-lastTap<DOUBLE_TAP_MS){
+      touchActive['sprint']=true;
+    }
+    if(btnName==='left')lastLeftTapTime=now;
+    else lastRightTapTime=now;
+  }
   touchActive[btnName]=true;
   if(touchId!==undefined)activeTouchMap[touchId]=btnName;
   else phoneActiveButton=btnName;
@@ -966,7 +965,16 @@ canvas.addEventListener('touchstart',e=>{
 },{passive:false});
 function releaseTouchById(touchId){
   const name=activeTouchMap[touchId];
-  if(name){touchActive[name]=false;delete activeTouchMap[touchId];}
+  if(name){
+    touchActive[name]=false;
+    delete activeTouchMap[touchId];
+    /* ★ 松开左/右方向键时清除疾跑 */
+    if(name==='left'||name==='right'){
+      if(!touchActive['left']&&!touchActive['right']){
+        touchActive['sprint']=false;
+      }
+    }
+  }
 }
 function releaseAllTouchButtons(){
   for(const id in activeTouchMap){touchActive[activeTouchMap[id]]=false;delete activeTouchMap[id];}
@@ -1063,7 +1071,6 @@ canvas.addEventListener('mousedown',e=>{
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
   if(isButtonClick(mx,my))playBtnSound();
-
   if(phoneMode&&gameState==='playing'&&!showInGameMenu){
     const btnName=hitTestTouchButtons(mx,my);
     if(btnName){
@@ -1086,7 +1093,6 @@ canvas.addEventListener('mousedown',e=>{
   }
   if(gameState==='menu'||gameState==='saves'||gameState==='createWorld'){
     if(showNameEditor){
-      /* ★ 粘贴按钮 */
       if(pointInRect(mx,my,NAME_PASTE_BTN.x,NAME_PASTE_BTN.y,NAME_PASTE_BTN.w,NAME_PASTE_BTN.h)){doPasteToInput('name');return;}
       if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h)){if(nameInputText.trim().length>0){playerName=nameInputText.trim();localStorage.setItem('mc2d_name',playerName);}showNameEditor=false;}
       return;
@@ -1097,14 +1103,12 @@ canvas.addEventListener('mousedown',e=>{
       return;
     }
     if(gameState==='createWorld'){
-      /* ★ 粘贴按钮 */
       if(pointInRect(mx,my,SEED_PASTE_BTN.x,SEED_PASTE_BTN.y,SEED_PASTE_BTN.w,SEED_PASTE_BTN.h)){doPasteToInput('seed');return;}
       if(pointInRect(mx,my,MENU_BUTTONS.createOk.x,MENU_BUTTONS.createOk.y,MENU_BUTTONS.createOk.w,MENU_BUTTONS.createOk.h))createWorldFromSeed();
       if(pointInRect(mx,my,MENU_BUTTONS.createBack.x,MENU_BUTTONS.createBack.y,MENU_BUTTONS.createBack.w,MENU_BUTTONS.createBack.h)){gameState='saves';menuSlide=0;}
       return;
     }
     if(gameState==='saves'){
-      /* ★ 粘贴按钮 */
       if(pointInRect(mx,my,SAVE_PASTE_BTN.x,SAVE_PASTE_BTN.y,SAVE_PASTE_BTN.w,SAVE_PASTE_BTN.h)){doPasteToInput('save');return;}
       if(pointInRect(mx,my,MENU_BUTTONS.loadSave.x,MENU_BUTTONS.loadSave.y,MENU_BUTTONS.loadSave.w,MENU_BUTTONS.loadSave.h)){tryLoadSaveCode();return;}
       if(pointInRect(mx,my,MENU_BUTTONS.newWorld.x,MENU_BUTTONS.newWorld.y,MENU_BUTTONS.newWorld.w,MENU_BUTTONS.newWorld.h)){seedInputText='';gameState='createWorld';menuSlide=0;return;}
@@ -1721,25 +1725,48 @@ function drawFullscreenTip(){
   ctx.fillStyle='#fff';ctx.font='bold 14px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';
   ctx.fillText('全屏',FULLSCREEN_BTN.x+FULLSCREEN_BTN.w/2,FULLSCREEN_BTN.y+FULLSCREEN_BTN.h/2);
 }
-function drawLogo(){
+/* ★ 游戏 HUD 里的小 logo：静态绘制 */
+function drawLogoStatic(x,y,maxW){
   if(!logoImage||!logoImage.complete||logoImage.naturalWidth<=0)return;
   const a=logoImage.naturalWidth/logoImage.naturalHeight;
-  const w=120,h=w/a;
+  const w=maxW,h=w/a;
   ctx.save();ctx.globalAlpha=0.9;ctx.imageSmoothingEnabled=true;
-  ctx.drawImage(logoImage,canvas.width-w-15,40,w,h);
+  ctx.drawImage(logoImage,x,y,w,h);
   ctx.restore();
+}
+/* ★ 主菜单大 logo：像素揭示动画 */
+function drawLogoRevealed(x,y,maxW){
+  if(!logoImage||!logoImage.complete||logoImage.naturalWidth<=0)return;
+  const a=logoImage.naturalWidth/logoImage.naturalHeight;
+  const w=Math.floor(maxW),h=Math.floor(w/a);
+  if(!logoRevealCache||logoRevealCacheW!==w||logoRevealCacheH!==h){
+    logoRevealCacheW=w;logoRevealCacheH=h;
+    logoRevealCache=document.createElement('canvas');
+    logoRevealCache.width=w;
+    logoRevealCache.height=h;
+    const lc=logoRevealCache.getContext('2d');
+    lc.imageSmoothingEnabled=true;
+    lc.drawImage(logoImage,0,0,w,h);
+    logoRevealProgress=0;
+  }
+  if(logoRevealProgress<1){
+    logoRevealProgress=Math.min(1,logoRevealProgress+0.02);
+  }
+  const rows=Math.max(1,Math.floor(h*logoRevealProgress));
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(logoRevealCache,0,0,w,rows,x,y,w,rows);
 }
 function drawTouchControls(){
   if(!phoneMode||gameState!=='playing')return;
   const size=50;
   const padX=20,padY=canvas.height-200;
+  /* ★ 已移除 sprint 按钮 */
   touchButtons={
     left:{x:padX,y:padY+size,w:size,h:size},
     right:{x:padX+size*2,y:padY+size,w:size,h:size},
     up:{x:padX+size,y:padY,w:size,h:size},
     down:{x:padX+size,y:padY+size*2,w:size,h:size},
     sneak:{x:padX+size,y:padY+size*3,w:size,h:size},
-    sprint:{x:canvas.width-160,y:canvas.height-120,w:60,h:60},
     jump:{x:canvas.width-80,y:canvas.height-120,w:60,h:60},
     inventory:{x:canvas.width-80,y:canvas.height-200,w:60,h:60},
     hideInv:{x:canvas.width-160,y:canvas.height-200,w:60,h:60},
@@ -1761,7 +1788,6 @@ function drawTouchControls(){
     if(name==='left')sym='◀';else if(name==='right')sym='▶';
     else if(name==='up')sym='▲';else if(name==='down')sym='▼';
     else if(name==='jump')sym='⬆';else if(name==='sneak')sym='⬇';
-    else if(name==='sprint')sym='»';
     else if(name==='inventory')sym='包';
     else if(name==='hideInv')sym='↕';
     else if(name==='menu')sym='三';
@@ -1794,7 +1820,8 @@ function drawLoadingScreen(){
   }
 }
 function drawHUD(){
-  drawHealth();drawInventoryBar();drawFullscreenTip();drawLogo();
+  drawHealth();drawInventoryBar();drawFullscreenTip();
+  drawLogoStatic(canvas.width-120-15,40,120);
   ctx.fillStyle='rgba(255,255,255,0.85)';ctx.font='14px '+FONT;ctx.textAlign='right';ctx.textBaseline='top';
   const hourFloat=(12+(gameTime/DAY_LENGTH)*24)%24;
   const hh=Math.floor(hourFloat);
@@ -1825,6 +1852,7 @@ function drawLog(){
     '创造模式: '+(player.creativeMode?'是':'否'),
     '手机模式: '+(phoneMode?'是':'否'),
     '物品栏: '+(inventoryBarHidden?'隐藏':'显示'),
+    '疾跑: '+(touchActive['sprint']?'是':'否'),
     '背包物品: '+inventory.filter(x=>x).length+'/'+INVENTORY_SIZE,
     '门状态: '+doorStates.size,
     '',
@@ -1868,9 +1896,12 @@ function drawMainMenu(){
   let lb=0;
   if(logoImage&&logoImage.complete&&logoImage.naturalWidth>0){
     const lA=logoImage.naturalWidth/logoImage.naturalHeight;
-    const lW=Math.min(360,canvas.width*0.45),lH=lW/lA;
-    const lX=(canvas.width-lW)/2,lY=canvas.height*0.12;
-    ctx.imageSmoothingEnabled=true;ctx.drawImage(logoImage,lX,lY,lW,lH);
+    const lW=Math.min(360,canvas.width*0.45);
+    const lH=Math.floor(lW/lA);
+    const lX=(canvas.width-lW)/2;
+    const lY=canvas.height*0.12;
+    /* ★ 像素揭示动画 */
+    drawLogoRevealed(lX,lY,lW);
     lb=lY+lH;
   }else lb=canvas.height*0.18+30;
   const bw=Math.min(400,canvas.width*0.55),bh=44,gap=8;
@@ -1891,7 +1922,6 @@ function drawSavesScreen(){
   ctx.fillText('单人游戏',canvas.width/2,canvas.height*0.1);
   const iw=Math.min(600,canvas.width*0.7),ih=120;
   SAVE_INPUT.x=(canvas.width-iw)/2;SAVE_INPUT.y=canvas.height*0.22;SAVE_INPUT.w=iw;SAVE_INPUT.h=ih;
-  /* ★ 存档粘贴按钮放在输入框右上角 */
   SAVE_PASTE_BTN.x=SAVE_INPUT.x+iw-SAVE_PASTE_BTN.w-6;
   SAVE_PASTE_BTN.y=SAVE_INPUT.y-42;
   SAVE_PASTE_BTN.w=100;SAVE_PASTE_BTN.h=36;
@@ -1920,7 +1950,6 @@ function drawCreateWorldScreen(){
   ctx.fillStyle='#fff';ctx.font='bold 32px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
   ctx.fillText('创建新世界',canvas.width/2,canvas.height*0.15);
   const iw=Math.min(400,canvas.width*0.55),ih=44;
-  /* ★ 输入框 + 粘贴按钮并排居中 */
   const gap=8;
   const totalW=iw+gap+SEED_PASTE_BTN.w;
   const startX=(canvas.width-totalW)/2;
@@ -1957,7 +1986,6 @@ function drawNameEditor(){
   ctx.fillStyle='#fff';ctx.font='bold 28px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
   ctx.fillText('编辑玩家信息',canvas.width/2,canvas.height*0.18);
   const iw=Math.min(400,canvas.width*0.55),ih=44;
-  /* ★ 输入框 + 粘贴按钮并排居中 */
   const gap=8;
   const totalW=iw+gap+NAME_PASTE_BTN.w;
   const startX=(canvas.width-totalW)/2;
