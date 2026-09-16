@@ -1,0 +1,2089 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>minecraft 2D</title>
+<link rel="icon" href="https://zh.minecraft.wiki/images/thumb/Bedrock_Edition_icon_2.png/120px-Bedrock_Edition_icon_2.png?80b87">
+<style>
+@import url('https://fonts.cdnfonts.com/css/unifont');
+@font-face{font-family:'Unifont';src:url('https://cdn.jsdelivr.net/npm/unifont@15.1.0/build/unifont-15.1.0.woff2') format('woff2');font-display:swap;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;min-height:100vh;overflow:hidden;font-family:'Unifont',monospace;}
+canvas{display:block;image-rendering:pixelated;font-family:'Unifont',monospace;cursor:default;touch-action:none;}
+#saveOverlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:100;justify-content:center;align-items:center;}
+#saveOverlay .panel{background:#1e1e30;padding:20px;border:3px solid #8a8aaa;max-width:90%;width:640px;}
+#saveCodeText{width:100%;height:140px;background:#0a0a15;color:#8f8;border:2px solid #666;padding:10px;font-family:'Courier New',monospace;font-size:12px;resize:none;word-break:break-all;}
+#saveOverlay .btns{margin-top:15px;text-align:center;}
+#saveOverlay button{color:#fff;padding:8px 30px;font-family:'Unifont',monospace;font-size:16px;cursor:pointer;margin:0 5px;}
+#saveConfirmBtn{background:#3a5a3a;border:2px solid #5c8;}
+#saveCancelBtn{background:#5a3a3a;border:2px solid #c55;}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="saveOverlay"><div class="panel">
+<div class="title">存档代码（Ctrl+A 全选，Ctrl+C 复制）：</div>
+<textarea id="saveCodeText" readonly></textarea>
+<div class="btns"><button id="saveConfirmBtn">确定</button><button id="saveCancelBtn">取消</button></div>
+</div></div>
+<script>
+(function(){
+'use strict';
+let allowClose=false;
+window.addEventListener('beforeunload',function(e){
+  if(allowClose)return;
+  e.preventDefault();e.returnValue='';return'';
+});
+const TILE=32,CHUNK_W=16,CHUNK_H=22;
+const GRAVITY=0.55,JUMP_VELOCITY=-6.63;
+const MOVE_SPEED=2.0,RUN_SPEED=4.0,FLY_SPEED=5.0;
+const SPRITE_FACES_RIGHT=false,FONT="Unifont, monospace";
+const PLAYER_W=TILE*0.75,PLAYER_H=TILE*1.8,SNEAK_H=TILE*1.75;
+const DAY_LENGTH=36000;
+const CACHE_KEY='mc2d_tex_cache_v4',CACHE_DURATION=24*60*60*1000;
+const ANIMAL_MAX=12,ANIMAL_SPAWN_INTERVAL=300,ANIMAL_SPAWN_RADIUS=24;
+const UI_HUGE=999999999999;
+let gameState='loading',showInGameMenu=false,showOptionsMenu=false,showNameEditor=false;
+let playerName=localStorage.getItem('mc2d_name')||'Steve';
+let nameInputText='',seedInputText='',saveCodeInputText='';
+let inputErrorMsg='',inputErrorTimer=0;
+let worldSeed=Math.floor(Math.random()*1000000),menuSlide=0;
+let phoneMode=localStorage.getItem('mc2d_phone')==='1';
+let isSneaking=false,sneakAnim=0;
+let gameTime=0,isNight=false,ctrlPressed=false,dayLight=1;
+let loadingPhase='download',downloadProgress=0,downloadTotal=0,animalSpawnTimer=0;
+let logVisible=false,frameCount=0,lastFpsTime=0,fps=60;
+const touchActive={};
+let touchButtons={},phoneActiveButton=null;
+const doorStates=new Map();
+const activeTouchMap={};
+
+/* ===== 音效（Web Audio API 合成，不依赖任何外部文件） ===== */
+let audioCtx=null;
+function ensureAudioCtx(){
+  if(!audioCtx){
+    try{
+      const AC=window.AudioContext||window.webkitAudioContext;
+      if(AC)audioCtx=new AC();
+    }catch(e){audioCtx=null;}
+  }
+  if(audioCtx&&audioCtx.state==='suspended'){
+    try{audioCtx.resume();}catch(e){}
+  }
+  return audioCtx;
+}
+/* 按钮点击：短促高频方波 */
+function playBtnSound(){
+  const ac=ensureAudioCtx();
+  if(!ac)return;
+  try{
+    const now=ac.currentTime;
+    const osc=ac.createOscillator();
+    const gain=ac.createGain();
+    osc.type='square';
+    osc.frequency.setValueAtTime(950,now);
+    osc.frequency.exponentialRampToValueAtTime(430,now+0.05);
+    gain.gain.setValueAtTime(0.12,now);
+    gain.gain.exponentialRampToValueAtTime(0.0005,now+0.07);
+    osc.connect(gain).connect(ac.destination);
+    osc.start(now);osc.stop(now+0.08);
+  }catch(e){}
+}
+/* 放置方块：低沉短噪声 + 低频正弦 */
+function playPlaceSound(){
+  const ac=ensureAudioCtx();
+  if(!ac)return;
+  try{
+    const now=ac.currentTime,dur=0.14;
+    const bufSize=Math.floor(ac.sampleRate*dur);
+    const buf=ac.createBuffer(1,bufSize,ac.sampleRate);
+    const data=buf.getChannelData(0);
+    for(let i=0;i<bufSize;i++){
+      data[i]=(Math.random()*2-1)*Math.pow(1-i/bufSize,2.5);
+    }
+    const src=ac.createBufferSource();
+    src.buffer=buf;
+    const filter=ac.createBiquadFilter();
+    filter.type='lowpass';
+    filter.frequency.setValueAtTime(900,now);
+    filter.frequency.exponentialRampToValueAtTime(220,now+dur);
+    const g1=ac.createGain();
+    g1.gain.setValueAtTime(0.35,now);
+    g1.gain.exponentialRampToValueAtTime(0.0005,now+dur);
+    src.connect(filter).connect(g1).connect(ac.destination);
+    src.start(now);src.stop(now+dur);
+
+    const osc=ac.createOscillator();
+    const g2=ac.createGain();
+    osc.type='sine';
+    osc.frequency.setValueAtTime(130,now);
+    osc.frequency.exponentialRampToValueAtTime(65,now+dur);
+    g2.gain.setValueAtTime(0.22,now);
+    g2.gain.exponentialRampToValueAtTime(0.0005,now+dur);
+    osc.connect(g2).connect(ac.destination);
+    osc.start(now);osc.stop(now+dur);
+  }catch(e){}
+}
+/* 破坏方块：中高频带通噪声 */
+function playBreakSound(){
+  const ac=ensureAudioCtx();
+  if(!ac)return;
+  try{
+    const now=ac.currentTime,dur=0.2;
+    const bufSize=Math.floor(ac.sampleRate*dur);
+    const buf=ac.createBuffer(1,bufSize,ac.sampleRate);
+    const data=buf.getChannelData(0);
+    for(let i=0;i<bufSize;i++){
+      data[i]=(Math.random()*2-1)*Math.pow(1-i/bufSize,1.8);
+    }
+    const src=ac.createBufferSource();
+    src.buffer=buf;
+    const filter=ac.createBiquadFilter();
+    filter.type='bandpass';
+    filter.frequency.setValueAtTime(1600,now);
+    filter.frequency.exponentialRampToValueAtTime(600,now+dur);
+    filter.Q.value=1.1;
+    const g=ac.createGain();
+    g.gain.setValueAtTime(0.32,now);
+    g.gain.exponentialRampToValueAtTime(0.0005,now+dur);
+    src.connect(filter).connect(g).connect(ac.destination);
+    src.start(now);src.stop(now+dur);
+  }catch(e){}
+}
+
+let lastTouchTime=0;
+
+const BLOCK={AIR:0,GRASS:1,DIRT:2,STONE:3,LOG:4,LEAVES:5,PLANKS:6,COBBLE:7,GLASS:8,CRAFTING:9,FURNACE:10,LIT_FURNACE:11,SAND:12,GRAVEL:13,COAL_ORE:14,IRON_ORE:15,GOLD_ORE:16,DIAMOND_ORE:17,BEDROCK:18,TORCH:19,DOOR_LOWER:20,DOOR_UPPER:21,LADDER:22,SAPLING:23,BED:24,WOOL:25};
+const ITEM={BLOCK_GRASS:100,BLOCK_DIRT:101,BLOCK_STONE:102,BLOCK_LOG:103,BLOCK_LEAVES:104,BLOCK_PLANKS:105,BLOCK_COBBLE:106,BLOCK_GLASS:107,BLOCK_CRAFTING:108,BLOCK_FURNACE:109,BLOCK_SAND:110,BLOCK_GRAVEL:111,COAL:200,CHARCOAL:201,STONE_ITEM:202,RAW_IRON:300,RAW_GOLD:301,DIAMOND:302,STICK:400,TORCH:401,DOOR:402,LADDER:403,SAPLING:404,APPLE:405,BED:406,WOOL:407,RAW_MUTTON:500,COOKED_MUTTON:501,RAW_CHICKEN:502,COOKED_CHICKEN:503};
+const BLOCK_TO_ITEM={
+  [BLOCK.GRASS]:ITEM.BLOCK_GRASS,[BLOCK.DIRT]:ITEM.BLOCK_DIRT,[BLOCK.STONE]:ITEM.BLOCK_COBBLE,
+  [BLOCK.LOG]:ITEM.BLOCK_LOG,[BLOCK.LEAVES]:null,[BLOCK.PLANKS]:ITEM.BLOCK_PLANKS,
+  [BLOCK.COBBLE]:ITEM.BLOCK_COBBLE,[BLOCK.GLASS]:ITEM.BLOCK_GLASS,[BLOCK.CRAFTING]:ITEM.BLOCK_CRAFTING,
+  [BLOCK.FURNACE]:ITEM.BLOCK_FURNACE,[BLOCK.LIT_FURNACE]:ITEM.BLOCK_FURNACE,[BLOCK.SAND]:ITEM.BLOCK_SAND,
+  [BLOCK.GRAVEL]:ITEM.BLOCK_GRAVEL,[BLOCK.COAL_ORE]:ITEM.COAL,[BLOCK.IRON_ORE]:ITEM.RAW_IRON,
+  [BLOCK.GOLD_ORE]:ITEM.RAW_GOLD,[BLOCK.DIAMOND_ORE]:ITEM.DIAMOND,[BLOCK.TORCH]:ITEM.TORCH,
+  [BLOCK.DOOR_LOWER]:ITEM.DOOR,[BLOCK.LADDER]:ITEM.LADDER,[BLOCK.SAPLING]:ITEM.SAPLING,
+  [BLOCK.BED]:ITEM.BED,[BLOCK.WOOL]:ITEM.WOOL};
+const ITEM_TO_BLOCK={
+  [ITEM.BLOCK_GRASS]:BLOCK.GRASS,[ITEM.BLOCK_DIRT]:BLOCK.DIRT,[ITEM.BLOCK_STONE]:BLOCK.STONE,
+  [ITEM.BLOCK_LOG]:BLOCK.LOG,[ITEM.BLOCK_LEAVES]:BLOCK.LEAVES,[ITEM.BLOCK_PLANKS]:BLOCK.PLANKS,
+  [ITEM.BLOCK_COBBLE]:BLOCK.COBBLE,[ITEM.BLOCK_GLASS]:BLOCK.GLASS,[ITEM.BLOCK_CRAFTING]:BLOCK.CRAFTING,
+  [ITEM.BLOCK_FURNACE]:BLOCK.FURNACE,[ITEM.BLOCK_SAND]:BLOCK.SAND,[ITEM.BLOCK_GRAVEL]:BLOCK.GRAVEL,
+  [ITEM.TORCH]:BLOCK.TORCH,[ITEM.DOOR]:BLOCK.DOOR_LOWER,[ITEM.LADDER]:BLOCK.LADDER,
+  [ITEM.SAPLING]:BLOCK.SAPLING,[ITEM.BED]:BLOCK.BED,[ITEM.WOOL]:BLOCK.WOOL,
+  [ITEM.COAL]:BLOCK.COAL_ORE,[ITEM.RAW_IRON]:BLOCK.IRON_ORE,[ITEM.RAW_GOLD]:BLOCK.GOLD_ORE,[ITEM.DIAMOND]:BLOCK.DIAMOND_ORE};
+const ITEM_ICON_BLOCK={
+  [ITEM.RAW_IRON]:BLOCK.IRON_ORE,[ITEM.RAW_GOLD]:BLOCK.GOLD_ORE,[ITEM.DIAMOND]:BLOCK.DIAMOND_ORE,
+  [ITEM.COAL]:BLOCK.COAL_ORE,[ITEM.STONE_ITEM]:BLOCK.STONE,[ITEM.TORCH]:BLOCK.TORCH,
+  [ITEM.LADDER]:BLOCK.LADDER,[ITEM.SAPLING]:BLOCK.SAPLING,[ITEM.DOOR]:BLOCK.DOOR_LOWER,
+  [ITEM.BED]:BLOCK.BED,[ITEM.WOOL]:BLOCK.WOOL};
+const TEXTURE_URLS={
+  [BLOCK.GRASS]:'https://zh.minecraft.wiki/images/BlockSprite_grass-block.png',
+  [BLOCK.DIRT]:'https://zh.minecraft.wiki/images/BlockSprite_dirt.png',
+  [BLOCK.STONE]:'https://zh.minecraft.wiki/images/BlockSprite_stone.png',
+  [BLOCK.LOG]:'https://zh.minecraft.wiki/images/BlockSprite_oak-log.png',
+  [BLOCK.LEAVES]:'https://zh.minecraft.wiki/images/BlockSprite_oak-leaves.png',
+  [BLOCK.CRAFTING]:'https://zh.minecraft.wiki/images/BlockSprite_crafting-table.png',
+  [BLOCK.PLANKS]:'https://zh.minecraft.wiki/images/BlockSprite_oak-planks.png',
+  [BLOCK.COBBLE]:'https://zh.minecraft.wiki/images/BlockSprite_cobble.png',
+  [BLOCK.GLASS]:'https://zh.minecraft.wiki/images/BlockSprite_glass.png',
+  [BLOCK.FURNACE]:'https://zh.minecraft.wiki/images/BlockSprite_furnace.png',
+  [BLOCK.LIT_FURNACE]:'https://zh.minecraft.wiki/images/BlockSprite_lit-furnace.png',
+  [BLOCK.SAND]:'https://zh.minecraft.wiki/images/BlockSprite_sand.png',
+  [BLOCK.GRAVEL]:'https://zh.minecraft.wiki/images/BlockSprite_gravel.png',
+  [BLOCK.COAL_ORE]:'https://zh.minecraft.wiki/images/BlockSprite_coal-ore.png',
+  [BLOCK.IRON_ORE]:'https://zh.minecraft.wiki/images/BlockSprite_iron-ore.png',
+  [BLOCK.GOLD_ORE]:'https://zh.minecraft.wiki/images/BlockSprite_gold-ore.png',
+  [BLOCK.DIAMOND_ORE]:'https://zh.minecraft.wiki/images/BlockSprite_diamond-ore.png',
+  [BLOCK.BEDROCK]:'https://zh.minecraft.wiki/images/BlockSprite_bedrock.png',
+  [BLOCK.TORCH]:'https://zh.minecraft.wiki/images/BlockSprite_torch.png',
+  [BLOCK.LADDER]:'https://zh.minecraft.wiki/images/BlockSprite_ladder.png',
+  [BLOCK.SAPLING]:'https://zh.minecraft.wiki/images/BlockSprite_oak-sapling.png',
+  [BLOCK.WOOL]:'https://zh.minecraft.wiki/images/BlockSprite_white-wool.png',
+  [BLOCK.DOOR_LOWER]:'https://zh.minecraft.wiki/images/BlockSprite_oak-door.png',
+  [BLOCK.DOOR_UPPER]:'https://zh.minecraft.wiki/images/BlockSprite_oak-door.png',
+  [BLOCK.BED]:'https://zh.minecraft.wiki/images/BlockSprite_red-bed.png'};
+const SPECIAL_ITEM_URLS={
+  [ITEM.STICK]:'https://zh.minecraft.wiki/images/Stick_JE1_BE1.png',
+  [ITEM.APPLE]:'https://zh.minecraft.wiki/images/Apple_JE3_BE3.png?cc008',
+  [ITEM.RAW_MUTTON]:'https://zh.minecraft.wiki/images/Raw_Mutton_JE3_BE2.png',
+  [ITEM.COOKED_MUTTON]:'https://zh.minecraft.wiki/images/Cooked_Mutton_JE3_BE2.png',
+  [ITEM.RAW_CHICKEN]:'https://zh.minecraft.wiki/images/Raw_Chicken_JE3_BE3.png',
+  [ITEM.COOKED_CHICKEN]:'https://zh.minecraft.wiki/images/Cooked_Chicken_JE2_BE2.png'};
+const STEVE_URL='https://zh.minecraft.wiki/images/thumb/Steve_JE5.png/111px-Steve_JE5.png?0b84d';
+const HEART_URL='https://zh.minecraft.wiki/images/Heart_%28icon%29.png?16571';
+const LOGO_URL='https://message.biliimg.com/bfs/im_new/a00cb80d273202d21b23c6925e8f9e5e3706941259910054.png';
+const LOADING_BG_URL='https://zh.minecraft.wiki/images/thumb/End_Poem_background_JE2.png/214px-End_Poem_background_JE2.png?5e829';
+const MENU_BG_URL=LOADING_BG_URL;
+const SHEEP_URL='https://zh.minecraft.wiki/images/thumb/White_Sheep_JE6.png/160px-White_Sheep_JE6.png?ccbd6';
+const CHICKEN_URL='https://zh.minecraft.wiki/images/thumb/Chicken_JE2_BE2.png/100px-Chicken_JE2_BE2.png?a9bbd';
+const BTN_NORMAL_URL='https://zh.minecraft.wiki/images/thumb/Java_edition_button.png/150px-Java_edition_button.png?f130c';
+const BTN_HOVER_URL='https://zh.minecraft.wiki/images/thumb/Java_edition_button_highlighted.png/150px-Java_edition_button_highlighted.png?73282';
+const BTN_DISABLED_URL='https://zh.minecraft.wiki/images/thumb/Java_edition_button_disabled.png/150px-Java_edition_button_disabled.png?4e490';
+const tileCanvasCache={},itemIconCache={};
+let playerSkin=null,playerSkinAspect=0.6,heartIcon=null,logoImage=null,loadingBgImage=null,menuBgImage=null;
+let sheepImage=null,chickenImage=null,btnNormal=null,btnHover=null,btnDisabled=null;
+let isLoading=true,loadingAlpha=1,loadingStartTime=0,loadTexturesFinished=false;
+const LOADING_FADE_SPEED=0.02,MIN_LOADING_TIME=600;
+const FULLSCREEN_BTN={x:15,y:0,w:80,h:30};
+const uiProgress={inventory:0,crafting:0,furnace:0};
+const UI_ANIM_SPEED=0.16,SLOT_SIZE=40,SLOT_GAP=2;
+let selectorX=0,selectorY=0,selectorInitialized=false;
+const SELECTOR_LERP=0.28;
+let dragging=null,animWorldCol=0,animWorldRow=0,boxInitialized=false;
+const BOX_LERP=0.3;
+const fallingBlocks=[],animals=[],saplings=new Map();
+const lightMap=new Map();
+const LIGHT_EMISSION={[BLOCK.TORCH]:14,[BLOCK.LIT_FURNACE]:13};
+const OPAQUE_BLOCKS=new Set([BLOCK.GRASS,BLOCK.DIRT,BLOCK.STONE,BLOCK.LOG,BLOCK.LEAVES,BLOCK.PLANKS,BLOCK.COBBLE,BLOCK.CRAFTING,BLOCK.FURNACE,BLOCK.LIT_FURNACE,BLOCK.SAND,BLOCK.GRAVEL,BLOCK.COAL_ORE,BLOCK.IRON_ORE,BLOCK.GOLD_ORE,BLOCK.DIAMOND_ORE,BLOCK.BEDROCK,BLOCK.DOOR_LOWER,BLOCK.DOOR_UPPER,BLOCK.BED,BLOCK.WOOL]);
+const MENU_BUTTONS={
+  singleplayer:{x:0,y:0,w:400,h:44,label:'单人游戏',enabled:true},
+  multiplayer:{x:0,y:0,w:400,h:44,label:'多人游戏',enabled:false},
+  options:{x:0,y:0,w:400,h:44,label:'选项',enabled:true},
+  editName:{x:0,y:0,w:400,h:44,label:'编辑玩家信息',enabled:true},
+  loadSave:{x:0,y:0,w:200,h:44,label:'读取存档',enabled:true},
+  newWorld:{x:0,y:0,w:200,h:44,label:'创建新世界',enabled:true},
+  back:{x:0,y:0,w:200,h:44,label:'返回',enabled:true},
+  createOk:{x:0,y:0,w:200,h:44,label:'创建世界',enabled:true},
+  createBack:{x:0,y:0,w:200,h:44,label:'返回',enabled:true},
+  resume:{x:0,y:0,w:400,h:44,label:'回到游戏',enabled:true},
+  gameOptions:{x:0,y:0,w:400,h:44,label:'选项',enabled:true},
+  saveQuit:{x:0,y:0,w:400,h:44,label:'保存并退出',enabled:true}};
+const DONE_BTN={x:0,y:0,w:200,h:44};
+const NAME_INPUT={x:0,y:0,w:400,h:44};
+const SEED_INPUT={x:0,y:0,w:400,h:44};
+const SAVE_INPUT={x:0,y:0,w:500,h:140};
+
+function encodeSave(d){try{return btoa(unescape(encodeURIComponent(JSON.stringify(d))));}catch(e){return'';}}
+function decodeSave(c){try{return JSON.parse(decodeURIComponent(escape(atob(c.trim().replace(/\s/g,'')))));}catch(e){return null;}}
+function easeOutCubic(t){return 1-Math.pow(1-t,3);}
+function lerpColor(c1,c2,t){return[Math.round(c1[0]+(c2[0]-c1[0])*t),Math.round(c1[1]+(c2[1]-c1[1])*t),Math.round(c1[2]+(c2[2]-c1[2])*t)];}
+
+function createFallbackTile(type){
+  const c=document.createElement('canvas');c.width=TILE;c.height=TILE;
+  const ctx=c.getContext('2d');
+  if(type===BLOCK.WOOL){
+    ctx.fillStyle='#f0f0f0';ctx.fillRect(0,0,TILE,TILE);
+    const px=TILE/8;
+    for(let y=0;y<8;y++)for(let x=0;x<8;x++){
+      ctx.fillStyle=Math.random()<0.5?'#e0e0e0':'#f8f8f8';
+      ctx.fillRect(x*px,y*px,px,px);
+    }
+    ctx.strokeStyle='rgba(0,0,0,0.15)';ctx.lineWidth=1;
+    ctx.strokeRect(0.5,0.5,TILE-1,TILE-1);return c;
+  }
+  if(type===BLOCK.DOOR_LOWER||type===BLOCK.DOOR_UPPER){
+    ctx.fillStyle='#a07840';ctx.fillRect(0,0,TILE,TILE);
+    ctx.fillStyle='#8a6830';ctx.fillRect(2,2,TILE-4,TILE-4);
+    ctx.fillStyle='#6a4a1a';ctx.fillRect(4,TILE/2-2,TILE-8,4);
+    if(type===BLOCK.DOOR_LOWER)ctx.fillRect(TILE-10,TILE/2+4,6,8);
+    return c;
+  }
+  ctx.fillStyle='#888';ctx.fillRect(0,0,TILE,TILE);return c;
+}
+function createItemIcon(itemType){
+  const c=document.createElement('canvas');c.width=32;c.height=32;
+  const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=false;
+  if(itemType===ITEM.APPLE){
+    ctx.fillStyle='#c03030';ctx.beginPath();ctx.arc(16,18,11,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#a02020';ctx.beginPath();ctx.arc(12,20,5,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#6a4020';ctx.fillRect(15,3,2,7);
+    ctx.fillStyle='#3a7a2a';ctx.beginPath();ctx.ellipse(21,6,5,2.5,-0.5,0,Math.PI*2);ctx.fill();
+    return c;
+  }
+  const oreBlock=ITEM_ICON_BLOCK[itemType];
+  if(oreBlock&&tileCanvasCache[oreBlock]){ctx.drawImage(tileCanvasCache[oreBlock],0,0,32,32);return c;}
+  const blockType=ITEM_TO_BLOCK[itemType];
+  if(blockType&&tileCanvasCache[blockType]){ctx.drawImage(tileCanvasCache[blockType],0,0,32,32);return c;}
+  ctx.fillStyle='#888';ctx.fillRect(4,4,24,24);return c;
+}
+function buildItemIcons(){
+  const items=[ITEM.BLOCK_GRASS,ITEM.BLOCK_DIRT,ITEM.BLOCK_STONE,ITEM.BLOCK_LOG,ITEM.BLOCK_LEAVES,ITEM.BLOCK_PLANKS,ITEM.BLOCK_COBBLE,ITEM.BLOCK_GLASS,ITEM.BLOCK_CRAFTING,ITEM.BLOCK_FURNACE,ITEM.BLOCK_SAND,ITEM.BLOCK_GRAVEL,ITEM.COAL,ITEM.CHARCOAL,ITEM.STONE_ITEM,ITEM.RAW_IRON,ITEM.RAW_GOLD,ITEM.DIAMOND,ITEM.STICK,ITEM.TORCH,ITEM.DOOR,ITEM.LADDER,ITEM.SAPLING,ITEM.APPLE,ITEM.BED,ITEM.WOOL,ITEM.RAW_MUTTON,ITEM.COOKED_MUTTON,ITEM.RAW_CHICKEN,ITEM.COOKED_CHICKEN];
+  items.forEach(item=>{if(!itemIconCache[item])itemIconCache[item]=createItemIcon(item);});
+}
+function loadTextures(callback){
+  loadTexturesFinished=false;
+  const types=Object.values(BLOCK).filter(t=>t!==BLOCK.AIR);
+  types.forEach(type=>{tileCanvasCache[type]=createFallbackTile(type);});
+  const urlTypes=types.filter(t=>TEXTURE_URLS[t]);
+  let loaded=0;
+  const total=urlTypes.length+Object.keys(SPECIAL_ITEM_URLS).length+9;
+  downloadTotal=total;downloadProgress=0;
+  function checkDone(){
+    if(loadTexturesFinished)return;
+    if(loaded>=total){loadTexturesFinished=true;buildItemIcons();try{localStorage.setItem(CACHE_KEY,Date.now().toString());}catch(e){}callback();}
+  }
+  setTimeout(()=>{if(!loadTexturesFinished){loadTexturesFinished=true;buildItemIcons();try{localStorage.setItem(CACHE_KEY,Date.now().toString());}catch(e){}callback();}},5000);
+  urlTypes.forEach(type=>{
+    const img=new Image();img.crossOrigin='anonymous';
+    img.onload=function(){const c=document.createElement('canvas');c.width=TILE;c.height=TILE;const cx=c.getContext('2d');cx.imageSmoothingEnabled=false;cx.drawImage(img,0,0,TILE,TILE);tileCanvasCache[type]=c;loaded++;downloadProgress=loaded;checkDone();};
+    img.onerror=function(){loaded++;downloadProgress=loaded;checkDone();};
+    img.src=TEXTURE_URLS[type];
+  });
+  Object.keys(SPECIAL_ITEM_URLS).forEach(it=>{
+    const img=new Image();img.crossOrigin='anonymous';
+    img.onload=function(){const c=document.createElement('canvas');c.width=32;c.height=32;const cx=c.getContext('2d');cx.imageSmoothingEnabled=false;cx.drawImage(img,0,0,32,32);itemIconCache[it]=c;loaded++;downloadProgress=loaded;checkDone();};
+    img.onerror=function(){loaded++;downloadProgress=loaded;checkDone();};
+    img.src=SPECIAL_ITEM_URLS[it];
+  });
+  function loadOne(setter){const img=new Image();img.crossOrigin='anonymous';img.onload=function(){setter(img);loaded++;downloadProgress=loaded;checkDone();};img.onerror=function(){loaded++;downloadProgress=loaded;checkDone();};return img;}
+  loadOne(i=>{playerSkin=i;playerSkinAspect=i.naturalWidth/i.naturalHeight;}).src=STEVE_URL;
+  loadOne(i=>{heartIcon=i;}).src=HEART_URL;
+  loadOne(i=>{logoImage=i;}).src=LOGO_URL;
+  loadOne(i=>{loadingBgImage=i;menuBgImage=i;}).src=LOADING_BG_URL;
+  loadOne(i=>{sheepImage=i;}).src=SHEEP_URL;
+  loadOne(i=>{chickenImage=i;}).src=CHICKEN_URL;
+  loadOne(i=>{btnNormal=i;}).src=BTN_NORMAL_URL;
+  loadOne(i=>{btnHover=i;}).src=BTN_HOVER_URL;
+  loadOne(i=>{btnDisabled=i;}).src=BTN_DISABLED_URL;
+}
+const chunks=new Map(),blockChanges=new Map();
+function seededRandom(seed){const x=Math.sin(seed)*10000;return x-Math.floor(x);}
+function getSurfaceHeight(worldX){
+  const s=worldSeed*0.00013;
+  const h1=Math.sin((worldX+s*100)*0.08)*3.0;
+  const h2=Math.sin((worldX+s*100)*0.21+2.5)*2.0;
+  const h3=Math.sin((worldX+s*100)*0.45+5.0)*1.2;
+  const h4=Math.sin((worldX+s*100)*0.03+1.0)*5.0;
+  let h=Math.round(CHUNK_H-8+h1+h2+h3+h4);
+  return Math.max(4,Math.min(CHUNK_H-3,h));
+}
+function generateChunk(chunkX){
+  const chunk=[];
+  for(let y=0;y<CHUNK_H;y++){chunk[y]=[];for(let x=0;x<CHUNK_W;x++)chunk[y][x]=BLOCK.AIR;}
+  for(let x=0;x<CHUNK_W;x++){
+    const worldX=chunkX*CHUNK_W+x;
+    const surfaceY=getSurfaceHeight(worldX);
+    for(let y=surfaceY;y<CHUNK_H;y++){
+      if(y===surfaceY)chunk[y][x]=BLOCK.GRASS;
+      else if(y<surfaceY+3)chunk[y][x]=BLOCK.DIRT;
+      else if(y>CHUNK_H-4)chunk[y][x]=BLOCK.STONE;
+      else{
+        const r=seededRandom(worldX*1000+y*100+worldSeed);
+        if(r<0.02)chunk[y][x]=BLOCK.COAL_ORE;
+        else if(r<0.035)chunk[y][x]=BLOCK.GRAVEL;
+        else if(r<0.045)chunk[y][x]=BLOCK.IRON_ORE;
+        else if(r<0.05)chunk[y][x]=BLOCK.GOLD_ORE;
+        else if(r<0.052)chunk[y][x]=BLOCK.DIAMOND_ORE;
+        else chunk[y][x]=BLOCK.STONE;
+      }
+    }
+    chunk[CHUNK_H-1][x]=BLOCK.BEDROCK;
+    chunk[CHUNK_H-2][x]=BLOCK.BEDROCK;
+  }
+  for(let x=2;x<CHUNK_W-2;x++){
+    const worldX=chunkX*CHUNK_W+x;
+    const surfaceY=getSurfaceHeight(worldX);
+    const r=seededRandom(worldX*12345+worldSeed);
+    if(r<0.12&&surfaceY>5){
+      const treeH=3+Math.floor(seededRandom(worldX*999+worldSeed)*2);
+      for(let i=1;i<=treeH;i++)if(surfaceY-i>=0)chunk[surfaceY-i][x]=BLOCK.LOG;
+      const leafTop=surfaceY-treeH-1;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-2;dx<=2;dx++){
+        const lx=x+dx,ly=leafTop+dy;
+        if(lx>=0&&lx<CHUNK_W&&ly>=0&&ly<CHUNK_H){
+          if(Math.abs(dx)===2&&dy!==0)continue;
+          if(chunk[ly][lx]===BLOCK.AIR)chunk[ly][lx]=BLOCK.LEAVES;
+        }
+      }
+      if(leafTop-1>=0)for(let dx=-1;dx<=1;dx++){
+        const lx=x+dx;
+        if(lx>=0&&lx<CHUNK_W&&chunk[leafTop-1][lx]===BLOCK.AIR)chunk[leafTop-1][lx]=BLOCK.LEAVES;
+      }
+    }
+  }
+  return chunk;
+}
+function getChunk(chunkX){if(!chunks.has(chunkX))chunks.set(chunkX,generateChunk(chunkX));return chunks.get(chunkX);}
+function getBlock(worldCol,worldRow){
+  if(worldRow<0||worldRow>=CHUNK_H)return BLOCK.AIR;
+  const key=worldCol+','+worldRow;
+  if(blockChanges.has(key))return blockChanges.get(key);
+  const chunkX=Math.floor(worldCol/CHUNK_W);
+  const localX=worldCol-chunkX*CHUNK_W;
+  return getChunk(chunkX)[worldRow][localX];
+}
+function setBlock(worldCol,worldRow,type){
+  if(worldRow<0||worldRow>=CHUNK_H)return;
+  blockChanges.set(worldCol+','+worldRow,type);
+  const chunkX=Math.floor(worldCol/CHUNK_W);
+  const localX=worldCol-chunkX*CHUNK_W;
+  getChunk(chunkX)[worldRow][localX]=type;
+  if(type===BLOCK.SAPLING)saplings.set(worldCol+','+worldRow,60*60*(3+Math.random()*4));
+  else saplings.delete(worldCol+','+worldRow);
+  if(type!==BLOCK.DOOR_LOWER&&type!==BLOCK.DOOR_UPPER)doorStates.delete(worldCol+','+worldRow);
+  recomputeLightAround(worldCol,worldRow);
+}
+function getLight(x,y){return lightMap.get(x+','+y)||0;}
+function recomputeLightAround(cx,cy){
+  const radius=20;
+  for(let dx=-radius;dx<=radius;dx++)for(let dy=-radius;dy<=radius;dy++){
+    const x=cx+dx,y=cy+dy;
+    if(y<0||y>=CHUNK_H)continue;
+    lightMap.delete(x+','+y);
+  }
+  const queue=[];
+  for(let dx=-radius;dx<=radius;dx++)for(let dy=-radius;dy<=radius;dy++){
+    const x=cx+dx,y=cy+dy;
+    if(y<0||y>=CHUNK_H)continue;
+    const e=LIGHT_EMISSION[getBlock(x,y)]||0;
+    if(e>0)queue.push({x,y,level:e});
+  }
+  while(queue.length>0){
+    const{x,y,level}=queue.shift();
+    if(level<=0)continue;
+    if(level<=(lightMap.get(x+','+y)||0))continue;
+    lightMap.set(x+','+y,level);
+    for(const[ddx,ddy]of[[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx=x+ddx,ny=y+ddy;
+      if(ny<0||ny>=CHUNK_H)continue;
+      if(OPAQUE_BLOCKS.has(getBlock(nx,ny)))continue;
+      queue.push({x:nx,y:ny,level:level-1});
+    }
+  }
+}
+function unloadFarChunks(){
+  const pc=Math.floor(player.x/(CHUNK_W*TILE));
+  for(const key of chunks.keys())if(Math.abs(key-pc)>5)chunks.delete(key);
+}
+function isDoorOpen(x,y){
+  const b=getBlock(x,y);
+  if(b===BLOCK.DOOR_LOWER)return doorStates.get(x+','+y)===true;
+  if(b===BLOCK.DOOR_UPPER)return doorStates.get(x+','+(y+1))===true;
+  return false;
+}
+function getDoorLowerKey(x,y){
+  const b=getBlock(x,y);
+  if(b===BLOCK.DOOR_LOWER)return x+','+y;
+  if(b===BLOCK.DOOR_UPPER)return x+','+(y+1);
+  return null;
+}
+const player={x:0,y:0,vx:0,vy:0,w:PLAYER_W,h:PLAYER_H,onGround:false,facing:1,creativeMode:false,maxHealth:20,health:20,fallStartY:0,isFalling:false,spawnX:0,spawnY:0};
+const INVENTORY_SIZE=36,INV_COLS=9,INV_ROWS=4;
+let inventory=new Array(INVENTORY_SIZE).fill(null);
+let selectedSlot=0;
+const drops=[],DROP_SIZE=20,DROP_MAX_AGE=6000;
+let showInventory=false,showCraftingTable=false,showFurnace=false;
+let craftMessage='',craftMessageTimer=0;
+const camera={x:0,y:0};
+const keys={};
+let mouseWorldX=0,mouseWorldY=0,mouseX=0,mouseY=0;
+function countItem(t){let n=0;for(let i=0;i<INVENTORY_SIZE;i++){const it=inventory[i];if(it&&it.type===t)n+=it.count;}return n;}
+function removeItem(t,c){let r=c;for(let i=0;i<INVENTORY_SIZE&&r>0;i++){const it=inventory[i];if(it&&it.type===t){const take=Math.min(it.count,r);it.count-=take;r-=take;if(it.count<=0)inventory[i]=null;}}return r===0;}
+function addItemToInventory(t,c){
+  let r=c;
+  for(let i=0;i<INVENTORY_SIZE&&r>0;i++){const it=inventory[i];if(it&&it.type===t&&it.count<64){const add=Math.min(64-it.count,r);it.count+=add;r-=add;}}
+  for(let i=0;i<INVENTORY_SIZE&&r>0;i++){if(!inventory[i]){const add=Math.min(64,r);inventory[i]={type:t,count:add};r-=add;}}
+  return r===0;
+}
+function setCraftMessage(m){craftMessage=m;craftMessageTimer=120;}
+const RECIPES={
+  inventory:[
+    {inputs:[{type:ITEM.BLOCK_LOG,count:1}],output:{type:ITEM.BLOCK_PLANKS,count:4},name:'1 原木 → 4 木板'},
+    {inputs:[{type:ITEM.BLOCK_PLANKS,count:4}],output:{type:ITEM.BLOCK_CRAFTING,count:1},name:'4 木板 → 1 工作台'},
+    {inputs:[{type:ITEM.BLOCK_PLANKS,count:2}],output:{type:ITEM.STICK,count:4},name:'2 木板 → 4 木棍'},
+    {inputs:[{type:ITEM.STICK,count:1},{type:ITEM.COAL,count:1}],output:{type:ITEM.TORCH,count:3},name:'1 木棍 + 1 煤炭 → 3 火把'}],
+  crafting:[
+    {inputs:[{type:ITEM.BLOCK_LOG,count:1}],output:{type:ITEM.BLOCK_PLANKS,count:4},name:'1 原木 → 4 木板'},
+    {inputs:[{type:ITEM.BLOCK_PLANKS,count:4}],output:{type:ITEM.BLOCK_CRAFTING,count:1},name:'4 木板 → 1 工作台'},
+    {inputs:[{type:ITEM.BLOCK_PLANKS,count:2}],output:{type:ITEM.STICK,count:4},name:'2 木板 → 4 木棍'},
+    {inputs:[{type:ITEM.BLOCK_COBBLE,count:8}],output:{type:ITEM.BLOCK_FURNACE,count:1},name:'8 原石 → 1 熔炉'},
+    {inputs:[{type:ITEM.BLOCK_PLANKS,count:6}],output:{type:ITEM.DOOR,count:3},name:'6 木板 → 3 门'},
+    {inputs:[{type:ITEM.STICK,count:7}],output:{type:ITEM.LADDER,count:3},name:'7 木棍 → 3 梯子'},
+    {inputs:[{type:ITEM.WOOL,count:3},{type:ITEM.BLOCK_PLANKS,count:3}],output:{type:ITEM.BED,count:1},name:'3 羊毛 + 3 木板 → 1 床'},
+    {inputs:[{type:ITEM.STICK,count:1},{type:ITEM.COAL,count:1}],output:{type:ITEM.TORCH,count:3},name:'1 木棍 + 1 煤炭 → 3 火把'}],
+  furnace:[
+    {inputs:[{type:ITEM.BLOCK_COBBLE,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.STONE_ITEM,count:8},name:'8 原石 + 1 煤炭 → 8 石头'},
+    {inputs:[{type:ITEM.BLOCK_LOG,count:5}],output:{type:ITEM.COAL,count:3},name:'5 原木 → 3 煤炭'},
+    {inputs:[{type:ITEM.RAW_MUTTON,count:1}],output:{type:ITEM.COOKED_MUTTON,count:1},name:'生羊肉 → 熟羊肉'},
+    {inputs:[{type:ITEM.RAW_CHICKEN,count:1}],output:{type:ITEM.COOKED_CHICKEN,count:1},name:'生鸡肉 → 熟鸡肉'}]};
+function canCraft(r){for(const i of r.inputs){let h=countItem(i.type);if(i.altType)h+=countItem(i.altType);if(h<i.count)return false;}return true;}
+function doCraft(r){
+  if(!canCraft(r)){setCraftMessage('材料不足：'+r.name);return false;}
+  for(const i of r.inputs){
+    if(i.altType){const need=i.count;const hm=countItem(i.type);const tm=Math.min(hm,need);if(tm>0)removeItem(i.type,tm);const rem=need-tm;if(rem>0)removeItem(i.altType,rem);}
+    else removeItem(i.type,i.count);
+  }
+  addItemToInventory(r.output.type,r.output.count);
+  setCraftMessage('合成成功：'+r.name);
+  return true;
+}
+function getInventoryUILayout(){const w=460,h=UI_HUGE;const x=(canvas.width-w)/2,y=0;return{x,y,w,h,recipeStartY:y+60,rowHeight:46};}
+function getCraftingTableUILayout(){const w=460,h=UI_HUGE;const x=(canvas.width-w)/2,y=0;return{x,y,w,h,recipeStartY:y+60,rowHeight:46};}
+function getFurnaceUILayout(){const w=480,h=UI_HUGE;const x=(canvas.width-w)/2,y=0;return{x,y,w,h,recipeStartY:y+60,rowHeight:46};}
+function pointInRect(px,py,rx,ry,rw,rh){return px>=rx&&px<=rx+rw&&py>=ry&&py<=ry+rh;}
+function getUIOffsetY(p){const e=easeOutCubic(p);return(1-e)*(canvas.height*0.7);}
+function getSlotTargetPos(i){
+  const barW=INV_COLS*SLOT_SIZE+(INV_COLS+1)*SLOT_GAP;
+  const barH=INV_ROWS*SLOT_SIZE+(INV_ROWS+1)*SLOT_GAP;
+  const barX=(canvas.width-barW)/2,barY=canvas.height-barH-15;
+  const col=i%INV_COLS,row=Math.floor(i/INV_COLS);
+  return{x:barX+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP),y:barY+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP)};
+}
+function updateSelectorAnim(){
+  const t=getSlotTargetPos(selectedSlot);
+  if(!selectorInitialized){selectorX=t.x;selectorY=t.y;selectorInitialized=true;}
+  else{selectorX+=(t.x-selectorX)*SELECTOR_LERP;selectorY+=(t.y-selectorY)*SELECTOR_LERP;
+    if(Math.abs(t.x-selectorX)<0.3)selectorX=t.x;
+    if(Math.abs(t.y-selectorY)<0.3)selectorY=t.y;}
+}
+function getInventoryBarRect(){
+  const barW=INV_COLS*SLOT_SIZE+(INV_COLS+1)*SLOT_GAP;
+  const barH=INV_ROWS*SLOT_SIZE+(INV_ROWS+1)*SLOT_GAP;
+  return{x:(canvas.width-barW)/2,y:canvas.height-barH-15,w:barW,h:barH};
+}
+function getSlotAtPoint(mx,my){
+  const bar=getInventoryBarRect();
+  for(let i=0;i<INVENTORY_SIZE;i++){
+    const col=i%INV_COLS,row=Math.floor(i/INV_COLS);
+    const sx=bar.x+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP);
+    const sy=bar.y+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP);
+    if(mx>=sx&&mx<=sx+SLOT_SIZE&&my>=sy&&my<=sy+SLOT_SIZE)return i;
+  }
+  return -1;
+}
+function dropSelectedItem(){
+  const item=inventory[selectedSlot];
+  if(!item||item.count<=0)return;
+  const dir=player.facing;
+  drops.push({x:player.x+player.w/2+dir*(player.w/2+4),y:player.y+player.h*0.3,vx:dir*4.5+(Math.random()-0.5)*1.2,vy:-3.5-Math.random()*1.2,type:item.type,count:1,age:0,onGround:false,pickupDelay:40});
+  item.count--;
+  if(item.count<=0)inventory[selectedSlot]=null;
+}
+function resetWorld(seed){
+  worldSeed=seed;
+  chunks.clear();blockChanges.clear();drops.length=0;fallingBlocks.length=0;
+  animals.length=0;saplings.clear();lightMap.clear();doorStates.clear();
+  inventory=new Array(INVENTORY_SIZE).fill(null);
+  selectedSlot=0;
+  player.health=player.maxHealth;player.vx=0;player.vy=0;
+  player.isFalling=false;player.facing=1;player.w=PLAYER_W;player.h=PLAYER_H;
+  const sy=getSurfaceHeight(8);
+  player.x=8*TILE;player.y=(sy-2)*TILE;
+  player.spawnX=player.x;player.spawnY=player.y;
+  camera.x=0;camera.y=0;
+  selectorInitialized=false;boxInitialized=false;
+  showInventory=false;showCraftingTable=false;showFurnace=false;
+  uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;
+  gameTime=0;dayLight=1;isNight=false;
+  animalSpawnTimer=0;
+  for(let i=0;i<4;i++){
+    spawnAnimal('sheep',(10+i*6)*TILE,(getSurfaceHeight(10+i*6)-1)*TILE);
+    spawnAnimal('chicken',(12+i*6)*TILE,(getSurfaceHeight(12+i*6)-1)*TILE);
+  }
+}
+function startGameWithSeed(seed){resetWorld(seed);gameState='playing';menuSlide=0;}
+function loadSaveCode(code){
+  const d=decodeSave(code);
+  if(!d)return false;
+  worldSeed=d.seed||0;
+  if(d.name){playerName=d.name;localStorage.setItem('mc2d_name',playerName);}
+  chunks.clear();blockChanges.clear();lightMap.clear();doorStates.clear();
+  if(Array.isArray(d.changes))for(const c of d.changes)if(Array.isArray(c)&&c.length===3)blockChanges.set(c[0]+','+c[1],c[2]);
+  drops.length=0;fallingBlocks.length=0;animals.length=0;saplings.clear();
+  inventory=new Array(INVENTORY_SIZE).fill(null);
+  if(Array.isArray(d.inventory))for(let i=0;i<INVENTORY_SIZE&&i<d.inventory.length;i++){
+    const it=d.inventory[i];
+    if(it&&typeof it.type==='number'&&typeof it.count==='number')inventory[i]={type:it.type,count:it.count};
+  }
+  selectedSlot=d.selectedSlot||0;
+  player.w=PLAYER_W;player.h=PLAYER_H;
+  player.x=d.x||8*TILE;player.y=d.y||(getSurfaceHeight(8)-2)*TILE;
+  player.health=typeof d.health==='number'?d.health:player.maxHealth;
+  player.vx=0;player.vy=0;player.isFalling=false;player.facing=1;
+  player.spawnX=player.x;player.spawnY=player.y;
+  selectorInitialized=false;boxInitialized=false;
+  showInventory=false;showCraftingTable=false;showFurnace=false;
+  uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;
+  gameState='playing';menuSlide=0;gameTime=0;dayLight=1;isNight=false;
+  animalSpawnTimer=0;
+  for(const key of blockChanges.keys()){
+    const[x,y]=key.split(',').map(Number);
+    recomputeLightAround(x,y);
+  }
+  return true;
+}
+function buildSaveCode(){
+  const inv=inventory.map(it=>it?{type:it.type,count:it.count}:null);
+  const chg=[];
+  for(const[k,v]of blockChanges){
+    const[x,y]=k.split(',').map(Number);
+    if(chunks.has(Math.floor(x/CHUNK_W)))chg.push([x,y,v]);
+  }
+  return encodeSave({version:2,seed:worldSeed,name:playerName,x:Math.round(player.x),y:Math.round(player.y),health:player.health,selectedSlot,inventory:inv,changes:chg});
+}
+function createWorldFromSeed(){
+  const t=seedInputText.trim();
+  let seed;
+  if(t==='')seed=Math.floor(Math.random()*100000000000000)+1;
+  else{const n=parseInt(t,10);seed=isNaN(n)?Math.floor(Math.random()*100000000000000)+1:Math.abs(n);}
+  startGameWithSeed(seed);
+}
+function tryLoadSaveCode(){
+  const c=saveCodeInputText.trim().replace(/\s/g,'');
+  if(!c){setInputError('请输入存档代码');return;}
+  if(!loadSaveCode(c)){setInputError('存档代码无效');return;}
+}
+function setInputError(m){inputErrorMsg=m;inputErrorTimer=120;}
+function getActiveInput(){
+  if(showNameEditor)return'name';
+  if(gameState==='saves')return'save';
+  if(gameState==='createWorld')return'seed';
+  return null;
+}
+document.addEventListener('keydown',e=>{
+  const key=e.key.toLowerCase();
+  keys[key]=true;
+  if(e.key===' ')e.preventDefault();
+  if(e.key==='Control')ctrlPressed=true;
+  if(e.key==='F3'&&e.shiftKey&&keys['enter']){
+    e.preventDefault();
+    logVisible=!logVisible;
+    return;
+  }
+  if(e.key==='F3'){e.preventDefault();return;}
+  if((e.ctrlKey||e.metaKey)&&key==='w')return;
+  if(gameState==='menu'||gameState==='saves'||gameState==='createWorld'){
+    if((e.ctrlKey||e.metaKey)&&key==='v')return;
+    if(showNameEditor){
+      if(e.key==='Enter'){if(nameInputText.trim().length>0){playerName=nameInputText.trim();localStorage.setItem('mc2d_name',playerName);}showNameEditor=false;return;}
+      if(e.key==='Escape'){showNameEditor=false;return;}
+      if(e.key==='Backspace'){nameInputText=nameInputText.slice(0,-1);e.preventDefault();return;}
+      if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&nameInputText.length<16){if(e.key>=' '&&e.key<='~'||e.key.charCodeAt(0)>127)nameInputText+=e.key;}
+      return;
+    }
+    if(gameState==='createWorld'){
+      if(e.key==='Enter'){createWorldFromSeed();return;}
+      if(e.key==='Escape'){gameState='saves';menuSlide=0;return;}
+      if(e.key==='Backspace'){seedInputText=seedInputText.slice(0,-1);e.preventDefault();return;}
+      if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&seedInputText.length<20){if(/[0-9\-]/.test(e.key))seedInputText+=e.key;}
+      return;
+    }
+    if(gameState==='saves'){
+      if(e.key==='Escape'){gameState='menu';menuSlide=0;return;}
+      if(e.key==='Enter'){tryLoadSaveCode();return;}
+      if(e.key==='Backspace'){saveCodeInputText=saveCodeInputText.slice(0,-1);e.preventDefault();return;}
+      if(e.key.length===1&&!e.ctrlKey&&!e.metaKey)saveCodeInputText+=e.key;
+      return;
+    }
+    if(showOptionsMenu){if(e.key==='Escape'||e.key==='Enter')showOptionsMenu=false;return;}
+    if(e.key==='Enter'){const s=Math.floor(Math.random()*100000000000000)+1;startGameWithSeed(s);return;}
+    return;
+  }
+  if(isLoading)return;
+  if(gameState==='playing'){
+    if(document.getElementById('saveOverlay').style.display==='flex')return;
+    if(e.key==='Escape'){
+      if(showInventory||showCraftingTable||showFurnace){showInventory=false;showCraftingTable=false;showFurnace=false;return;}
+      if(showInGameMenu){if(showOptionsMenu){showOptionsMenu=false;return;}showInGameMenu=false;return;}
+      showInGameMenu=true;showOptionsMenu=false;return;
+    }
+    if(showInGameMenu)return;
+    if(key==='q'&&!e.repeat){if(showInventory||showCraftingTable||showFurnace)return;dropSelectedItem();return;}
+    if(key==='e'&&!e.repeat){if(showInventory||showCraftingTable||showFurnace){showInventory=false;showCraftingTable=false;showFurnace=false;}else showInventory=true;}
+    if(e.key>='1'&&e.key<='9'&&!e.repeat){const n=parseInt(e.key)-1;const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=r*INV_COLS+n;}
+    if(key==='z'&&!e.repeat){const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=((r-1+INV_ROWS)%INV_ROWS)*INV_COLS;}
+    if(key==='x'&&!e.repeat){const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=((r+1)%INV_ROWS)*INV_COLS;}
+  }
+});
+document.addEventListener('keyup',e=>{
+  keys[e.key.toLowerCase()]=false;
+  if(e.key==='Control')ctrlPressed=false;
+});
+document.addEventListener('paste',e=>{
+  const active=getActiveInput();
+  if(!active)return;
+  e.preventDefault();
+  let text=(e.clipboardData||window.clipboardData).getData('text');
+  if(!text)return;
+  if(active==='name'){text=text.replace(/[\x00-\x1f\x7f]/g,'');if(nameInputText.length+text.length>16)text=text.slice(0,16-nameInputText.length);nameInputText+=text;}
+  else if(active==='save'){saveCodeInputText+=text;}
+  else if(active==='seed'){text=text.replace(/[^0-9\-]/g,'');if(seedInputText.length+text.length>20)text=text.slice(0,20-seedInputText.length);seedInputText+=text;}
+});
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+function resize(){
+  canvas.width=window.innerWidth;canvas.height=window.innerHeight;
+  canvas.style.width=canvas.width+'px';canvas.style.height=canvas.height+'px';
+  selectorInitialized=false;boxInitialized=false;
+}
+window.addEventListener('resize',resize);
+resize();
+
+/* 屏幕坐标 → 世界坐标（无缩放） */
+function screenToWorld(mx,my){
+  return {x: camera.x + mx, y: camera.y + my};
+}
+
+/* ===================== 手机模式交互逻辑 ===================== */
+
+function isFunctionalBlock(b){
+  return b===BLOCK.CRAFTING||b===BLOCK.FURNACE||b===BLOCK.LIT_FURNACE||b===BLOCK.BED||b===BLOCK.DOOR_LOWER||b===BLOCK.DOOR_UPPER;
+}
+
+function breakBlockAt(worldCol,worldRow){
+  const block=getBlock(worldCol,worldRow);
+  if(block===BLOCK.AIR||block===BLOCK.BEDROCK||block===BLOCK.DOOR_UPPER)return;
+  const overlap=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
+  if(overlap)return;
+  setBlock(worldCol,worldRow,BLOCK.AIR);
+  playBreakSound();
+  if(block===BLOCK.LEAVES){
+    if(Math.random()<0.25)spawnDrop(worldCol,worldRow,ITEM.SAPLING,1);
+    if(Math.random()<0.10)spawnDrop(worldCol,worldRow,ITEM.STICK,1);
+    if(Math.random()<0.05)spawnDrop(worldCol,worldRow,ITEM.APPLE,1);
+  }else if(block===BLOCK.DOOR_LOWER){
+    setBlock(worldCol,worldRow-1,BLOCK.AIR);
+    spawnDrop(worldCol,worldRow,ITEM.DOOR,1);
+  }else{
+    const di=BLOCK_TO_ITEM[block];
+    if(di!==undefined&&di!==null)spawnDrop(worldCol,worldRow,di,1);
+  }
+}
+
+function interactFunctionalBlock(worldCol,worldRow){
+  const block=getBlock(worldCol,worldRow);
+  if(block===BLOCK.CRAFTING){showCraftingTable=true;showInventory=false;showFurnace=false;}
+  else if(block===BLOCK.FURNACE||block===BLOCK.LIT_FURNACE){showFurnace=true;showInventory=false;showCraftingTable=false;}
+  else if(block===BLOCK.BED){gameTime=0;dayLight=1;isNight=false;player.spawnX=player.x;player.spawnY=player.y;player.health=player.maxHealth;}
+  else if(block===BLOCK.DOOR_LOWER||block===BLOCK.DOOR_UPPER){
+    const key2=getDoorLowerKey(worldCol,worldRow);
+    if(key2){const cur=doorStates.get(key2)===true;doorStates.set(key2,!cur);}
+  }
+}
+
+function phoneWorldDown(mx,my){
+  const wp=screenToWorld(mx,my);
+  const wx=wp.x, wy=wp.y;
+
+  for(const a of animals){
+    if(wx>=a.x&&wx<=a.x+a.w&&wy>=a.y&&wy<=a.y+a.h){
+      a.health-=4;
+      playBreakSound();
+      return;
+    }
+  }
+
+  const worldCol=Math.floor(wx/TILE);
+  const worldRow=Math.floor(wy/TILE);
+  const block=getBlock(worldCol,worldRow);
+  const overlap=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
+
+  if(block!==BLOCK.AIR){
+    if(overlap)return;
+    if(block===BLOCK.BEDROCK)return;
+    if(block===BLOCK.DOOR_UPPER)return;
+    if(isFunctionalBlock(block)){
+      const touchYInTile=wy-worldRow*TILE;
+      if(touchYInTile<TILE/2){
+        breakBlockAt(worldCol,worldRow);
+      }else{
+        interactFunctionalBlock(worldCol,worldRow);
+      }
+    }else{
+      breakBlockAt(worldCol,worldRow);
+    }
+    return;
+  }
+
+  if(overlap)return;
+  const item=inventory[selectedSlot];
+  if(!item)return;
+  if(item.type===ITEM.APPLE||item.type===ITEM.RAW_MUTTON||item.type===ITEM.COOKED_MUTTON||item.type===ITEM.RAW_CHICKEN||item.type===ITEM.COOKED_CHICKEN){
+    let heal=item.type===ITEM.APPLE?4:((item.type===ITEM.RAW_MUTTON||item.type===ITEM.RAW_CHICKEN)?2:6);
+    player.health=Math.min(player.maxHealth,player.health+heal);
+    item.count--;if(item.count<=0)inventory[selectedSlot]=null;
+    return;
+  }
+  const pb=ITEM_TO_BLOCK[item.type];
+  if(pb===undefined)return;
+  if(pb===BLOCK.DOOR_LOWER){
+    if(getBlock(worldCol,worldRow-1)!==BLOCK.AIR)return;
+    setBlock(worldCol,worldRow,BLOCK.DOOR_LOWER);
+    setBlock(worldCol,worldRow-1,BLOCK.DOOR_UPPER);
+    doorStates.set(worldCol+','+worldRow,false);
+  }else{
+    setBlock(worldCol,worldRow,pb);
+  }
+  playPlaceSound();
+  if(pb===BLOCK.SAND||pb===BLOCK.GRAVEL){
+    const below=getBlock(worldCol,worldRow+1);
+    if(below===BLOCK.AIR||below===BLOCK.TORCH){
+      setBlock(worldCol,worldRow,BLOCK.AIR);
+      fallingBlocks.push({x:worldCol*TILE+TILE/2,y:worldRow*TILE,vy:0,type:pb});
+    }
+  }
+  item.count--;if(item.count<=0)inventory[selectedSlot]=null;
+}
+
+function hitTestTouchButtons(mx,my){
+  for(const name in touchButtons){
+    const btn=touchButtons[name];
+    if(pointInRect(mx,my,btn.x,btn.y,btn.w,btn.h))return name;
+  }
+  return null;
+}
+
+function handleTouchGame(mx,my){
+  if(showInGameMenu){
+    if(showOptionsMenu){
+      if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){
+        phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;
+      }
+      if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h)){showOptionsMenu=false;return;}
+      return;
+    }
+    if(pointInRect(mx,my,MENU_BUTTONS.resume.x,MENU_BUTTONS.resume.y,MENU_BUTTONS.resume.w,MENU_BUTTONS.resume.h)){showInGameMenu=false;return;}
+    if(pointInRect(mx,my,MENU_BUTTONS.gameOptions.x,MENU_BUTTONS.gameOptions.y,MENU_BUTTONS.gameOptions.w,MENU_BUTTONS.gameOptions.h)){showOptionsMenu=true;return;}
+    if(pointInRect(mx,my,MENU_BUTTONS.saveQuit.x,MENU_BUTTONS.saveQuit.y,MENU_BUTTONS.saveQuit.w,MENU_BUTTONS.saveQuit.h)){
+      const c=buildSaveCode();
+      document.getElementById('saveCodeText').value=c;
+      document.getElementById('saveOverlay').style.display='flex';
+      return;
+    }
+    return;
+  }
+
+  if(showInventory||showCraftingTable||showFurnace){
+    let L=null,recipes=null,progress=0;
+    if(showInventory){L=getInventoryUILayout();recipes=RECIPES.inventory;progress=uiProgress.inventory;}
+    else if(showCraftingTable){L=getCraftingTableUILayout();recipes=RECIPES.crafting;progress=uiProgress.crafting;}
+    else if(showFurnace){L=getFurnaceUILayout();recipes=RECIPES.furnace;progress=uiProgress.furnace;}
+    const o=getUIOffsetY(progress);
+    const uiLeft=L.x,uiRight=L.x+L.w;
+    if(mx>=uiLeft&&mx<=uiRight){
+      for(let i=0;i<recipes.length;i++){
+        const ryScreen=L.recipeStartY+i*L.rowHeight+o;
+        if(pointInRect(mx,my,L.x+15,ryScreen,L.w-30,L.rowHeight-4)){
+          doCraft(recipes[i]);
+          return;
+        }
+      }
+      return;
+    }
+    showInventory=false;showCraftingTable=false;showFurnace=false;
+    return;
+  }
+
+  const bar=getInventoryBarRect();
+  if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
+    const slot=getSlotAtPoint(mx,my);
+    if(slot>=0){selectedSlot=slot;return;}
+  }
+
+  phoneWorldDown(mx,my);
+}
+
+function handleTouchMenu(mx,my,ox){
+  const mmx=mx-ox;
+  if(showNameEditor){
+    if(pointInRect(mmx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h)){
+      if(nameInputText.trim().length>0){playerName=nameInputText.trim();localStorage.setItem('mc2d_name',playerName);}
+      showNameEditor=false;
+    }
+    return;
+  }
+  if(showOptionsMenu){
+    if(pointInRect(mmx,my,canvas.width/2-150,canvas.height*0.35,300,44)){
+      phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;
+    }
+    if(pointInRect(mmx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))showOptionsMenu=false;
+    return;
+  }
+  if(gameState==='createWorld'){
+    if(pointInRect(mmx,my,MENU_BUTTONS.createOk.x,MENU_BUTTONS.createOk.y,MENU_BUTTONS.createOk.w,MENU_BUTTONS.createOk.h))createWorldFromSeed();
+    if(pointInRect(mmx,my,MENU_BUTTONS.createBack.x,MENU_BUTTONS.createBack.y,MENU_BUTTONS.createBack.w,MENU_BUTTONS.createBack.h)){gameState='saves';menuSlide=0;}
+    return;
+  }
+  if(gameState==='saves'){
+    if(pointInRect(mmx,my,MENU_BUTTONS.loadSave.x,MENU_BUTTONS.loadSave.y,MENU_BUTTONS.loadSave.w,MENU_BUTTONS.loadSave.h)){tryLoadSaveCode();return;}
+    if(pointInRect(mmx,my,MENU_BUTTONS.newWorld.x,MENU_BUTTONS.newWorld.y,MENU_BUTTONS.newWorld.w,MENU_BUTTONS.newWorld.h)){seedInputText='';gameState='createWorld';menuSlide=0;return;}
+    if(pointInRect(mmx,my,MENU_BUTTONS.back.x,MENU_BUTTONS.back.y,MENU_BUTTONS.back.w,MENU_BUTTONS.back.h)){gameState='menu';menuSlide=0;return;}
+    return;
+  }
+  if(gameState==='menu'){
+    if(pointInRect(mmx,my,MENU_BUTTONS.singleplayer.x,MENU_BUTTONS.singleplayer.y,MENU_BUTTONS.singleplayer.w,MENU_BUTTONS.singleplayer.h)){gameState='saves';menuSlide=0;saveCodeInputText='';return;}
+    if(pointInRect(mmx,my,MENU_BUTTONS.options.x,MENU_BUTTONS.options.y,MENU_BUTTONS.options.w,MENU_BUTTONS.options.h)){showOptionsMenu=true;return;}
+    if(pointInRect(mmx,my,MENU_BUTTONS.editName.x,MENU_BUTTONS.editName.y,MENU_BUTTONS.editName.w,MENU_BUTTONS.editName.h)){nameInputText=playerName;showNameEditor=true;return;}
+    return;
+  }
+}
+
+/* ===== 触摸事件 ===== */
+canvas.addEventListener('touchstart',e=>{
+  if(!phoneMode)return;
+  e.preventDefault();
+  lastTouchTime=Date.now();
+  for(const t of e.changedTouches){
+    const rect=canvas.getBoundingClientRect();
+    const mx=t.clientX-rect.left,my=t.clientY-rect.top;
+
+    if(gameState==='playing'&&!showInGameMenu){
+      const btnName=hitTestTouchButtons(mx,my);
+      if(btnName){
+        touchActive[btnName]=true;
+        activeTouchMap[t.identifier]=btnName;
+        if(btnName==='menu'){
+          showInGameMenu=true;
+          touchActive[btnName]=false;
+          delete activeTouchMap[t.identifier];
+        }
+        continue;
+      }
+      handleTouchGame(mx,my);
+    }else if(gameState==='menu'||gameState==='saves'||gameState==='createWorld'){
+      const ease=easeOutCubic(menuSlide);
+      const ox=(1-ease)*canvas.width;
+      const mmx=mx-ox;
+      if(isButtonClick(mmx,my))playBtnSound();
+      handleTouchMenu(mx,my,ox);
+    }else{
+      handleTouchGame(mx,my);
+    }
+  }
+},{passive:false});
+
+function releaseTouchById(touchId){
+  const name=activeTouchMap[touchId];
+  if(name){
+    touchActive[name]=false;
+    delete activeTouchMap[touchId];
+  }
+}
+
+function releaseAllTouchButtons(){
+  for(const id in activeTouchMap){
+    touchActive[activeTouchMap[id]]=false;
+    delete activeTouchMap[id];
+  }
+  touchActive['left']=false;
+  touchActive['right']=false;
+  touchActive['up']=false;
+  touchActive['down']=false;
+  touchActive['jump']=false;
+  touchActive['sneak']=false;
+  touchActive['sprint']=false;
+}
+
+canvas.addEventListener('touchend',e=>{
+  if(!phoneMode)return;
+  e.preventDefault();
+  lastTouchTime=Date.now();
+  for(const t of e.changedTouches){
+    releaseTouchById(t.identifier);
+  }
+  if(Object.keys(activeTouchMap).length===0){
+    releaseAllTouchButtons();
+  }
+},{passive:false});
+
+canvas.addEventListener('touchcancel',e=>{
+  if(!phoneMode)return;
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    releaseTouchById(t.identifier);
+  }
+  if(Object.keys(activeTouchMap).length===0){
+    releaseAllTouchButtons();
+  }
+},{passive:false});
+
+function isButtonClick(mx,my){
+  if(gameState==='menu'){
+    if(showNameEditor){
+      if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))return true;
+      return false;
+    }
+    if(showOptionsMenu){
+      if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44))return true;
+      if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))return true;
+      return false;
+    }
+    if(pointInRect(mx,my,MENU_BUTTONS.singleplayer.x,MENU_BUTTONS.singleplayer.y,MENU_BUTTONS.singleplayer.w,MENU_BUTTONS.singleplayer.h))return true;
+    if(pointInRect(mx,my,MENU_BUTTONS.options.x,MENU_BUTTONS.options.y,MENU_BUTTONS.options.w,MENU_BUTTONS.options.h))return true;
+    if(pointInRect(mx,my,MENU_BUTTONS.editName.x,MENU_BUTTONS.editName.y,MENU_BUTTONS.editName.w,MENU_BUTTONS.editName.h))return true;
+    return false;
+  }
+  if(gameState==='saves'){
+    if(pointInRect(mx,my,MENU_BUTTONS.loadSave.x,MENU_BUTTONS.loadSave.y,MENU_BUTTONS.loadSave.w,MENU_BUTTONS.loadSave.h))return true;
+    if(pointInRect(mx,my,MENU_BUTTONS.newWorld.x,MENU_BUTTONS.newWorld.y,MENU_BUTTONS.newWorld.w,MENU_BUTTONS.newWorld.h))return true;
+    if(pointInRect(mx,my,MENU_BUTTONS.back.x,MENU_BUTTONS.back.y,MENU_BUTTONS.back.w,MENU_BUTTONS.back.h))return true;
+    return false;
+  }
+  if(gameState==='createWorld'){
+    if(pointInRect(mx,my,MENU_BUTTONS.createOk.x,MENU_BUTTONS.createOk.y,MENU_BUTTONS.createOk.w,MENU_BUTTONS.createOk.h))return true;
+    if(pointInRect(mx,my,MENU_BUTTONS.createBack.x,MENU_BUTTONS.createBack.y,MENU_BUTTONS.createBack.w,MENU_BUTTONS.createBack.h))return true;
+    return false;
+  }
+  if(gameState==='playing'&&showInGameMenu){
+    if(showOptionsMenu){
+      if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44))return true;
+      if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))return true;
+      return false;
+    }
+    if(pointInRect(mx,my,MENU_BUTTONS.resume.x,MENU_BUTTONS.resume.y,MENU_BUTTONS.resume.w,MENU_BUTTONS.resume.h))return true;
+    if(pointInRect(mx,my,MENU_BUTTONS.gameOptions.x,MENU_BUTTONS.gameOptions.y,MENU_BUTTONS.gameOptions.w,MENU_BUTTONS.gameOptions.h))return true;
+    if(pointInRect(mx,my,MENU_BUTTONS.saveQuit.x,MENU_BUTTONS.saveQuit.y,MENU_BUTTONS.saveQuit.w,MENU_BUTTONS.saveQuit.h))return true;
+  }
+  return false;
+}
+
+/* ===== 鼠标事件 ===== */
+canvas.addEventListener('mousemove',e=>{
+  const rect=canvas.getBoundingClientRect();
+  const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  mouseX=mx;mouseY=my;
+  const wp=screenToWorld(mx,my);
+  mouseWorldX=wp.x;mouseWorldY=wp.y;
+  if(dragging){dragging.x=mx;dragging.y=my;}
+  if(gameState==='playing'&&!showInGameMenu&&!showInventory&&!showCraftingTable&&!showFurnace){
+    canvas.style.cursor='crosshair';
+  }else{
+    let onBtn=false;
+    const btns=[MENU_BUTTONS.singleplayer,MENU_BUTTONS.multiplayer,MENU_BUTTONS.options,MENU_BUTTONS.editName,MENU_BUTTONS.loadSave,MENU_BUTTONS.newWorld,MENU_BUTTONS.back,MENU_BUTTONS.createOk,MENU_BUTTONS.createBack,MENU_BUTTONS.resume,MENU_BUTTONS.gameOptions,MENU_BUTTONS.saveQuit,DONE_BTN];
+    for(const b of btns){if(b.enabled!==false&&pointInRect(mx,my,b.x,b.y,b.w,b.h)){onBtn=true;break;}}
+    canvas.style.cursor=onBtn?'pointer':'default';
+  }
+});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+window.addEventListener('wheel',e=>{
+  if(gameState!=='playing'||showInGameMenu)return;
+  if(showInventory||showCraftingTable||showFurnace)return;
+  if(document.getElementById('saveOverlay').style.display==='flex')return;
+  e.preventDefault();
+  if(e.deltaY>0)selectedSlot=(selectedSlot+1)%INVENTORY_SIZE;
+  else if(e.deltaY<0)selectedSlot=(selectedSlot-1+INVENTORY_SIZE)%INVENTORY_SIZE;
+},{passive:false});
+
+canvas.addEventListener('mousedown',e=>{
+  if(Date.now()-lastTouchTime<500)return;
+  e.preventDefault();
+  const rect=canvas.getBoundingClientRect();
+  const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  if(isButtonClick(mx,my))playBtnSound();
+
+  if(phoneMode&&gameState==='playing'&&!showInGameMenu){
+    const btnName=hitTestTouchButtons(mx,my);
+    if(btnName){
+      touchActive[btnName]=true;
+      phoneActiveButton=btnName;
+      if(btnName==='menu'){showInGameMenu=true;touchActive[btnName]=false;phoneActiveButton=null;}
+      return;
+    }
+    handleTouchGame(mx,my);
+    return;
+  }
+
+  if(!showInGameMenu&&!document.fullscreenElement&&gameState==='playing'){
+    if(pointInRect(mx,my,FULLSCREEN_BTN.x,FULLSCREEN_BTN.y,FULLSCREEN_BTN.w,FULLSCREEN_BTN.h)){
+      document.documentElement.requestFullscreen();return;
+    }
+  }
+  if((gameState==='menu'||gameState==='saves'||gameState==='createWorld')&&showOptionsMenu){
+    if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){
+      phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;
+    }
+    if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))showOptionsMenu=false;
+    return;
+  }
+  if(gameState==='menu'||gameState==='saves'||gameState==='createWorld'){
+    if(showNameEditor){
+      if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h)){if(nameInputText.trim().length>0){playerName=nameInputText.trim();localStorage.setItem('mc2d_name',playerName);}showNameEditor=false;}
+      return;
+    }
+    if(showOptionsMenu){
+      if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){
+        phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;
+      }
+      if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))showOptionsMenu=false;
+      return;
+    }
+    if(gameState==='createWorld'){
+      if(pointInRect(mx,my,MENU_BUTTONS.createOk.x,MENU_BUTTONS.createOk.y,MENU_BUTTONS.createOk.w,MENU_BUTTONS.createOk.h))createWorldFromSeed();
+      if(pointInRect(mx,my,MENU_BUTTONS.createBack.x,MENU_BUTTONS.createBack.y,MENU_BUTTONS.createBack.w,MENU_BUTTONS.createBack.h)){gameState='saves';menuSlide=0;}
+      return;
+    }
+    if(gameState==='saves'){
+      if(pointInRect(mx,my,MENU_BUTTONS.loadSave.x,MENU_BUTTONS.loadSave.y,MENU_BUTTONS.loadSave.w,MENU_BUTTONS.loadSave.h)){tryLoadSaveCode();return;}
+      if(pointInRect(mx,my,MENU_BUTTONS.newWorld.x,MENU_BUTTONS.newWorld.y,MENU_BUTTONS.newWorld.w,MENU_BUTTONS.newWorld.h)){seedInputText='';gameState='createWorld';menuSlide=0;return;}
+      if(pointInRect(mx,my,MENU_BUTTONS.back.x,MENU_BUTTONS.back.y,MENU_BUTTONS.back.w,MENU_BUTTONS.back.h)){gameState='menu';menuSlide=0;return;}
+      return;
+    }
+    if(pointInRect(mx,my,MENU_BUTTONS.singleplayer.x,MENU_BUTTONS.singleplayer.y,MENU_BUTTONS.singleplayer.w,MENU_BUTTONS.singleplayer.h)){gameState='saves';menuSlide=0;saveCodeInputText='';return;}
+    if(pointInRect(mx,my,MENU_BUTTONS.options.x,MENU_BUTTONS.options.y,MENU_BUTTONS.options.w,MENU_BUTTONS.options.h)){showOptionsMenu=true;return;}
+    if(pointInRect(mx,my,MENU_BUTTONS.editName.x,MENU_BUTTONS.editName.y,MENU_BUTTONS.editName.w,MENU_BUTTONS.editName.h)){nameInputText=playerName;showNameEditor=true;return;}
+    return;
+  }
+  if(gameState!=='playing'||isLoading)return;
+  if(showInGameMenu){
+    if(showOptionsMenu){
+      if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){
+        phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;
+      }
+      if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))showOptionsMenu=false;
+      return;
+    }
+    if(pointInRect(mx,my,MENU_BUTTONS.resume.x,MENU_BUTTONS.resume.y,MENU_BUTTONS.resume.w,MENU_BUTTONS.resume.h)){showInGameMenu=false;return;}
+    if(pointInRect(mx,my,MENU_BUTTONS.gameOptions.x,MENU_BUTTONS.gameOptions.y,MENU_BUTTONS.gameOptions.w,MENU_BUTTONS.gameOptions.h)){showOptionsMenu=true;return;}
+    if(pointInRect(mx,my,MENU_BUTTONS.saveQuit.x,MENU_BUTTONS.saveQuit.y,MENU_BUTTONS.saveQuit.w,MENU_BUTTONS.saveQuit.h)){
+      const c=buildSaveCode();
+      document.getElementById('saveCodeText').value=c;
+      document.getElementById('saveOverlay').style.display='flex';
+      return;
+    }
+    return;
+  }
+  if(showInventory||uiProgress.inventory>0.01){
+    const o=getUIOffsetY(uiProgress.inventory);
+    const L=getInventoryUILayout();
+    for(let i=0;i<RECIPES.inventory.length;i++){
+      const ry=L.recipeStartY+i*L.rowHeight;
+      if(pointInRect(mx,my-o,L.x+15,ry,L.w-30,L.rowHeight-4)){doCraft(RECIPES.inventory[i]);return;}
+    }
+    if(showInventory)return;
+  }
+  if(showCraftingTable||uiProgress.crafting>0.01){
+    const o=getUIOffsetY(uiProgress.crafting);
+    const L=getCraftingTableUILayout();
+    for(let i=0;i<RECIPES.crafting.length;i++){
+      const ry=L.recipeStartY+i*L.rowHeight;
+      if(pointInRect(mx,my-o,L.x+15,ry,L.w-30,L.rowHeight-4)){doCraft(RECIPES.crafting[i]);return;}
+    }
+    if(showCraftingTable)return;
+  }
+  if(showFurnace||uiProgress.furnace>0.01){
+    const o=getUIOffsetY(uiProgress.furnace);
+    const L=getFurnaceUILayout();
+    for(let i=0;i<RECIPES.furnace.length;i++){
+      const ry=L.recipeStartY+i*L.rowHeight;
+      if(pointInRect(mx,my-o,L.x+15,ry,L.w-30,L.rowHeight-4)){doCraft(RECIPES.furnace[i]);return;}
+    }
+    if(showFurnace)return;
+  }
+  if(e.button===0){
+    const bar=getInventoryBarRect();
+    if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
+      const slot=getSlotAtPoint(mx,my);
+      if(slot>=0){const it=inventory[slot];if(it){dragging={fromSlot:slot,x:mx,y:my,item:it};inventory[slot]=null;}}
+      return;
+    }
+  }
+  const worldCol=Math.floor(mouseWorldX/TILE);
+  const worldRow=Math.floor(mouseWorldY/TILE);
+  const overlap=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
+  if(e.button===0){
+    for(const a of animals){
+      if(mouseWorldX>=a.x&&mouseWorldX<=a.x+a.w&&mouseWorldY>=a.y&&mouseWorldY<=a.y+a.h){a.health-=4;playBreakSound();return;}
+    }
+  }
+  if(e.button===0){
+    const block=getBlock(worldCol,worldRow);
+    if(block===BLOCK.BEDROCK)return;
+    if(block===BLOCK.DOOR_UPPER)return;
+    if(block!==BLOCK.AIR&&!overlap){
+      setBlock(worldCol,worldRow,BLOCK.AIR);
+      playBreakSound();
+      if(block===BLOCK.LEAVES){
+        if(Math.random()<0.25)spawnDrop(worldCol,worldRow,ITEM.SAPLING,1);
+        if(Math.random()<0.10)spawnDrop(worldCol,worldRow,ITEM.STICK,1);
+        if(Math.random()<0.05)spawnDrop(worldCol,worldRow,ITEM.APPLE,1);
+      }else if(block===BLOCK.DOOR_LOWER){
+        setBlock(worldCol,worldRow-1,BLOCK.AIR);spawnDrop(worldCol,worldRow,ITEM.DOOR,1);
+      }else{
+        const di=BLOCK_TO_ITEM[block];
+        if(di!==undefined&&di!==null)spawnDrop(worldCol,worldRow,di,1);
+      }
+    }
+  }else if(e.button===2){
+    const block=getBlock(worldCol,worldRow);
+    if(block===BLOCK.CRAFTING&&!overlap){showCraftingTable=true;showInventory=false;showFurnace=false;return;}
+    if((block===BLOCK.FURNACE||block===BLOCK.LIT_FURNACE)&&!overlap){showFurnace=true;showInventory=false;showCraftingTable=false;return;}
+    if(block===BLOCK.DOOR_LOWER||block===BLOCK.DOOR_UPPER){
+      const key2=getDoorLowerKey(worldCol,worldRow);
+      if(key2){const cur=doorStates.get(key2)===true;doorStates.set(key2,!cur);}
+      return;
+    }
+    if(block===BLOCK.BED){
+      gameTime=0;dayLight=1;isNight=false;
+      player.spawnX=player.x;player.spawnY=player.y;player.health=player.maxHealth;return;
+    }
+    if(block===BLOCK.AIR&&!overlap){
+      const item=inventory[selectedSlot];
+      if(!item)return;
+      if(item.type===ITEM.APPLE||item.type===ITEM.RAW_MUTTON||item.type===ITEM.COOKED_MUTTON||item.type===ITEM.RAW_CHICKEN||item.type===ITEM.COOKED_CHICKEN){
+        let heal=item.type===ITEM.APPLE?4:((item.type===ITEM.RAW_MUTTON||item.type===ITEM.RAW_CHICKEN)?2:6);
+        player.health=Math.min(player.maxHealth,player.health+heal);
+        item.count--;if(item.count<=0)inventory[selectedSlot]=null;return;
+      }
+      const pb=ITEM_TO_BLOCK[item.type];
+      if(pb!==undefined){
+        if(pb===BLOCK.DOOR_LOWER){
+          if(getBlock(worldCol,worldRow-1)!==BLOCK.AIR)return;
+          setBlock(worldCol,worldRow,BLOCK.DOOR_LOWER);setBlock(worldCol,worldRow-1,BLOCK.DOOR_UPPER);
+          doorStates.set(worldCol+','+worldRow,false);
+        }else setBlock(worldCol,worldRow,pb);
+        playPlaceSound();
+        if(pb===BLOCK.SAND||pb===BLOCK.GRAVEL){
+          const below=getBlock(worldCol,worldRow+1);
+          if(below===BLOCK.AIR||below===BLOCK.TORCH){setBlock(worldCol,worldRow,BLOCK.AIR);fallingBlocks.push({x:worldCol*TILE+TILE/2,y:worldRow*TILE,vy:0,type:pb});}
+        }
+        item.count--;if(item.count<=0)inventory[selectedSlot]=null;
+      }
+    }
+  }
+});
+canvas.addEventListener('mouseup',e=>{
+  releaseAllTouchButtons();
+  phoneActiveButton=null;
+  if(gameState!=='playing'||isLoading)return;
+  if(!dragging)return;
+  const rect=canvas.getBoundingClientRect();
+  const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  const target=getSlotAtPoint(mx,my);
+  if(target>=0&&target!==dragging.fromSlot){
+    const ti=inventory[target];
+    inventory[target]=dragging.item;
+    if(ti)inventory[dragging.fromSlot]=ti;
+  }else inventory[dragging.fromSlot]=dragging.item;
+  dragging=null;
+});
+
+canvas.addEventListener('mouseleave',e=>{
+  releaseAllTouchButtons();
+  phoneActiveButton=null;
+});
+
+window.addEventListener('blur',()=>{
+  releaseAllTouchButtons();
+  phoneActiveButton=null;
+  for(const k in keys)keys[k]=false;
+});
+
+document.getElementById('saveConfirmBtn').addEventListener('click',()=>{
+  allowClose=true;location.reload();
+});
+document.getElementById('saveCancelBtn').addEventListener('click',()=>{
+  document.getElementById('saveOverlay').style.display='none';
+});
+function spawnDrop(wc,wr,t,c){
+  if(t===null||t===undefined)return;
+  drops.push({x:wc*TILE+TILE/2,y:wr*TILE+TILE/2,vx:(Math.random()-0.5)*2.5,vy:-3-Math.random()*1.5,type:t,count:c||1,age:0,onGround:false,pickupDelay:0});
+}
+function spawnAnimal(type,x,y){animals.push({type,x,y,vx:0,vy:0,w:TILE,h:TILE,health:10,maxHealth:10,onGround:false,facing:1,wanderTimer:0,wanderDir:0,age:0});}
+function updateAnimals(){
+  for(let i=animals.length-1;i>=0;i--){
+    const a=animals[i];
+    a.age++;a.wanderTimer--;
+    if(a.wanderTimer<=0){a.wanderTimer=60+Math.random()*120;a.wanderDir=Math.random()<0.5?-1:1;if(Math.random()<0.35)a.wanderDir=0;}
+    a.vx=a.wanderDir*0.7;
+    if(a.vx!==0)a.facing=a.vx>0?1:-1;
+    const oldX=a.x;a.x+=a.vx;
+    const col=Math.floor((a.x+a.w/2)/TILE),row=Math.floor((a.y+a.h-4)/TILE);
+    if(row>=0&&row<CHUNK_H){
+      const f=getBlock(col,row);
+      if(f!==BLOCK.AIR&&f!==BLOCK.GLASS&&f!==BLOCK.TORCH&&f!==BLOCK.LADDER&&f!==BLOCK.SAPLING&&f!==BLOCK.DOOR_LOWER&&f!==BLOCK.DOOR_UPPER){a.x=oldX;a.wanderDir*=-1;}
+    }
+    a.vy=Math.min(a.vy+GRAVITY,12);a.y+=a.vy;
+    const gr=Math.floor((a.y+a.h)/TILE),gc=Math.floor((a.x+a.w/2)/TILE);
+    if(gr>=0&&gr<CHUNK_H){
+      const g=getBlock(gc,gr);
+      if(g!==BLOCK.AIR&&g!==BLOCK.GLASS&&g!==BLOCK.TORCH&&g!==BLOCK.LADDER&&g!==BLOCK.SAPLING){a.y=gr*TILE-a.h;a.vy=0;a.onGround=true;}
+      else a.onGround=false;
+    }
+    if(a.health<=0){
+      if(a.type==='sheep'){
+        spawnDrop(Math.floor(a.x/TILE),Math.floor(a.y/TILE),ITEM.RAW_MUTTON,1);
+        const w=1+Math.floor(Math.random()*3);
+        spawnDrop(Math.floor(a.x/TILE),Math.floor(a.y/TILE),ITEM.WOOL,w);
+      }else if(a.type==='chicken'){
+        spawnDrop(Math.floor(a.x/TILE),Math.floor(a.y/TILE),ITEM.RAW_CHICKEN,1);
+      }
+      animals.splice(i,1);
+    }
+  }
+}
+function updateAnimalSpawning(){
+  animalSpawnTimer++;
+  if(animalSpawnTimer<ANIMAL_SPAWN_INTERVAL)return;
+  animalSpawnTimer=0;
+  if(animals.length>=ANIMAL_MAX)return;
+  for(let attempt=0;attempt<5;attempt++){
+    const angle=Math.random()*Math.PI*2;
+    const dist=8+Math.random()*(ANIMAL_SPAWN_RADIUS-8);
+    const targetX=Math.floor((player.x/TILE)+Math.cos(angle)*dist);
+    const targetY=Math.floor((player.y/TILE)+Math.sin(angle)*dist);
+    const groundBlock=getBlock(targetX,targetY+1);
+    const space1=getBlock(targetX,targetY);
+    const space2=getBlock(targetX,targetY-1);
+    if((groundBlock===BLOCK.GRASS||groundBlock===BLOCK.DIRT)&&space1===BLOCK.AIR&&space2===BLOCK.AIR){
+      const dx=targetX*TILE-player.x,dy=targetY*TILE-player.y;
+      if(dx*dx+dy*dy<6*TILE*6*TILE)continue;
+      const type=Math.random()<0.6?'sheep':'chicken';
+      spawnAnimal(type,targetX*TILE,targetY*TILE);
+      return;
+    }
+  }
+}
+function updateFallingBlocks(){
+  for(let i=fallingBlocks.length-1;i>=0;i--){
+    const fb=fallingBlocks[i];
+    fb.vy+=GRAVITY*0.8;fb.y+=fb.vy;
+    const col=Math.floor(fb.x/TILE),row=Math.floor((fb.y+TILE/2)/TILE);
+    if(row>=0&&row<CHUNK_H){
+      const below=getBlock(col,row);
+      if(below!==BLOCK.AIR&&below!==BLOCK.GLASS){
+        if(below===BLOCK.TORCH||below===BLOCK.LADDER||below===BLOCK.SAPLING)spawnDrop(col,row-1,BLOCK_TO_ITEM[fb.type]||fb.type,1);
+        else setBlock(col,row-1,fb.type);
+        fallingBlocks.splice(i,1);
+      }
+    }
+    if(fb.y>CHUNK_H*TILE+100)fallingBlocks.splice(i,1);
+  }
+}
+function updateSaplings(){
+  for(const[k,fr]of saplings){
+    const nf=fr-1;
+    if(nf<=0){const[x,y]=k.split(',').map(Number);growTree(x,y);saplings.delete(k);}
+    else saplings.set(k,nf);
+  }
+}
+function growTree(x,y){
+  const th=4+Math.floor(Math.random()*2);
+  for(let dx=-2;dx<=2;dx++)for(let dy=-th-1;dy<=0;dy++){
+    const bx=x+dx,by=y+dy;const b=getBlock(bx,by);
+    if(b!==BLOCK.AIR&&b!==BLOCK.SAPLING){const d=BLOCK_TO_ITEM[b];if(d)spawnDrop(bx,by,d,1);}
+  }
+  for(let i=0;i<th;i++)setBlock(x,y-i,BLOCK.LOG);
+  const lt=y-th-1;
+  for(let dy=-1;dy<=1;dy++)for(let dx=-2;dx<=2;dx++){
+    const lx=x+dx,ly=lt+dy;
+    if(Math.abs(dx)===2&&dy!==0)continue;
+    if(getBlock(lx,ly)===BLOCK.AIR)setBlock(lx,ly,BLOCK.LEAVES);
+  }
+  if(lt-1>=0)for(let dx=-1;dx<=1;dx++)if(getBlock(x+dx,lt-1)===BLOCK.AIR)setBlock(x+dx,lt-1,BLOCK.LEAVES);
+}
+function updateDrops(){
+  for(let i=drops.length-1;i>=0;i--){
+    const d=drops[i];
+    d.age++;if(d.pickupDelay>0)d.pickupDelay--;
+    d.vy+=GRAVITY*0.75;d.vy=Math.min(d.vy,12);
+    d.x+=d.vx;d.y+=d.vy;d.vx*=0.94;
+    if(Math.abs(d.vx)<0.05)d.vx=0;
+    const cx=Math.floor(d.x/TILE),by=Math.floor((d.y+DROP_SIZE/2)/TILE);
+    if(by>=0&&by<CHUNK_H){
+      const below=getBlock(cx,by);
+      if(below!==BLOCK.AIR&&below!==BLOCK.GLASS&&below!==BLOCK.TORCH&&below!==BLOCK.LADDER&&below!==BLOCK.SAPLING){d.y=by*TILE-DROP_SIZE/2;if(d.vy>0)d.vy=0;d.onGround=true;}
+      else d.onGround=false;
+    }
+    const lx=Math.floor((d.x-DROP_SIZE/2)/TILE),rx=Math.floor((d.x+DROP_SIZE/2)/TILE),my=Math.floor(d.y/TILE);
+    if(my>=0&&my<CHUNK_H){
+      const bL=getBlock(lx,my);
+      if(bL!==BLOCK.AIR&&bL!==BLOCK.GLASS){d.x=(lx+1)*TILE+DROP_SIZE/2;d.vx=0;}
+      const bR=getBlock(rx,my);
+      if(bR!==BLOCK.AIR&&bR!==BLOCK.GLASS){d.x=rx*TILE-DROP_SIZE/2;d.vx=0;}
+    }
+    if(d.pickupDelay<=0){
+      const pr=8;
+      if(d.x+DROP_SIZE/2+pr>player.x&&d.x-DROP_SIZE/2-pr<player.x+player.w&&d.y+DROP_SIZE/2+pr>player.y&&d.y-DROP_SIZE/2-pr<player.y+player.h){
+        if(addItemToInventory(d.type,d.count||1)){drops.splice(i,1);continue;}
+      }
+    }
+    if(d.age>DROP_MAX_AGE)drops.splice(i,1);
+  }
+}
+function getBlocksInRect(px,py,pw,ph){
+  const l=Math.floor(px/TILE),r=Math.floor((px+pw-0.01)/TILE);
+  const t=Math.floor(py/TILE),b=Math.floor((py+ph-0.01)/TILE);
+  const out=[];
+  for(let y=t;y<=b;y++)for(let x=l;x<=r;x++){
+    if(y<0||y>=CHUNK_H)continue;
+    const bl=getBlock(x,y);
+    if(bl===BLOCK.AIR||bl===BLOCK.GLASS||bl===BLOCK.TORCH||bl===BLOCK.LADDER||bl===BLOCK.SAPLING)continue;
+    if(bl===BLOCK.DOOR_LOWER||bl===BLOCK.DOOR_UPPER){
+      if(isDoorOpen(x,y))continue;
+      out.push({row:y,col:x,type:bl});
+      continue;
+    }
+    out.push({row:y,col:x,type:bl});
+  }
+  return out;
+}
+function isInLadder(px,py,pw,ph){
+  const l=Math.floor(px/TILE),r=Math.floor((px+pw-0.01)/TILE);
+  const t=Math.floor(py/TILE),b=Math.floor((py+ph-0.01)/TILE);
+  for(let y=t;y<=b;y++)for(let x=l;x<=r;x++)if(getBlock(x,y)===BLOCK.LADDER)return true;
+  return false;
+}
+function updatePhysics(){
+  if(showInGameMenu)return;
+  const isRunning = keys['control'] || keys['controlleft'] || keys['controlright'] || (phoneMode && touchActive['sprint']);
+  const currentSpeed=isRunning?RUN_SPEED:MOVE_SPEED;
+  const onLadder=isInLadder(player.x,player.y,player.w,player.h);
+  const sneakKey=phoneMode
+    ?(touchActive['sneak']||touchActive['down']||keys['shift']||keys['s']||keys['arrowdown'])
+    :(keys['shift']||keys['s']||keys['arrowdown']);
+  isSneaking=sneakKey;
+  const targetH=isSneaking?SNEAK_H:PLAYER_H;
+  if(Math.abs(player.h-targetH)>0.5)player.h+=(targetH-player.h)*0.25;
+  else player.h=targetH;
+  sneakAnim=isSneaking?Math.min(1,sneakAnim+0.15):Math.max(0,sneakAnim-0.15);
+  if(player.creativeMode){
+    let dx=0,dy=0;
+    if(touchActive['left']||keys['a']||keys['arrowleft'])dx=-currentSpeed;
+    if(touchActive['right']||keys['d']||keys['arrowright'])dx=currentSpeed;
+    if(touchActive['jump']||touchActive['up']||keys[' ']||keys['w']||keys['arrowup'])dy=-FLY_SPEED;
+    if(touchActive['sneak']||touchActive['down']||keys['shift']||keys['s']||keys['arrowdown'])dy=FLY_SPEED;
+    if(dx!==0)player.facing=dx>0?1:-1;
+    player.x+=dx;player.y+=dy;player.vy=0;player.onGround=false;player.isFalling=false;
+  }else{
+    let dx=0;
+    if(touchActive['left']||keys['a']||keys['arrowleft'])dx=-currentSpeed;
+    if(touchActive['right']||keys['d']||keys['arrowright'])dx=currentSpeed;
+    if(dx!==0)player.facing=dx>0?1:-1;
+    player.x+=dx;
+    let blocks=getBlocksInRect(player.x,player.y,player.w,player.h);
+    for(const b of blocks){if(dx>0)player.x=b.col*TILE-player.w;else if(dx<0)player.x=b.col*TILE+TILE;}
+    if(onLadder){
+      const upKey=touchActive['jump']||touchActive['up']||keys['w']||keys[' ']||keys['arrowup'];
+      const downKey=touchActive['sneak']||touchActive['down']||keys['s']||keys['shift']||keys['arrowdown'];
+      if(upKey)player.vy=-3;
+      else if(downKey)player.vy=3;
+      else player.vy=0;
+      player.onGround=false;
+    }else{
+      if(!player.onGround&&!player.isFalling){player.isFalling=true;player.fallStartY=player.y;}
+      player.vy=Math.min(player.vy+GRAVITY,15);
+    }
+    player.y+=player.vy;player.onGround=false;
+    blocks=getBlocksInRect(player.x,player.y,player.w,player.h);
+    for(const b of blocks){
+      if(player.vy>0){player.y=b.row*TILE-player.h;player.vy=0;player.onGround=true;}
+      else if(player.vy<0){player.y=b.row*TILE+TILE;player.vy=0;}
+    }
+    if(player.onGround&&player.isFalling){
+      const fd=Math.floor((player.y-player.fallStartY)/TILE);
+      if(fd>3){
+        const dmg=fd-3;
+        player.health=Math.max(0,player.health-dmg);
+        if(player.health<=0){player.health=player.maxHealth;player.x=player.spawnX;player.y=player.spawnY;player.vy=0;}
+      }
+      player.isFalling=false;
+    }
+    if(player.y>CHUNK_H*TILE+200){player.x=player.spawnX;player.y=player.spawnY;player.vy=0;player.health=player.maxHealth;player.isFalling=false;}
+    if(player.y<0){player.y=0;player.vy=0;}
+    const jumpKey=touchActive['jump']||touchActive['up']||keys[' ']||keys['w']||keys['arrowup'];
+    if(jumpKey&&player.onGround&&!onLadder){
+      player.vy=JUMP_VELOCITY;
+      player.onGround=false;
+    }
+  }
+}
+function updateCamera(){
+  camera.x=player.x+player.w/2-canvas.width/2;
+  camera.y=player.y+player.h/2-canvas.height/2;
+  if(camera.y<-TILE*10)camera.y=-TILE*10;
+  if(camera.y>CHUNK_H*TILE-canvas.height+TILE*5)camera.y=CHUNK_H*TILE-canvas.height+TILE*5;
+}
+function updateTime(){
+  gameTime++;
+  if(gameTime>=DAY_LENGTH)gameTime=0;
+  dayLight=(Math.cos(gameTime/DAY_LENGTH*Math.PI*2)+1)/2;
+  isNight=dayLight<0.3;
+}
+function drawBackground(){
+  const dayTop=[108,180,238],dayBot=[200,232,248];
+  const nightTop=[10,10,46],nightBot=[42,42,78];
+  const sunsetTop=[255,140,84],sunsetBot=[255,204,136];
+  let top,bot;
+  if(dayLight>0.5){
+    const t=(dayLight-0.5)*2;
+    top=lerpColor(sunsetTop,dayTop,t);
+    bot=lerpColor(sunsetBot,dayBot,t);
+  }else{
+    const t=dayLight*2;
+    top=lerpColor(nightTop,sunsetTop,t);
+    bot=lerpColor(nightBot,sunsetBot,t);
+  }
+  const g=ctx.createLinearGradient(0,0,0,canvas.height);
+  g.addColorStop(0,'rgb('+top[0]+','+top[1]+','+top[2]+')');
+  g.addColorStop(1,'rgb('+bot[0]+','+bot[1]+','+bot[2]+')');
+  ctx.fillStyle=g;ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+function drawWorld(){
+  const sc=Math.floor(camera.x/TILE)-1,ec=Math.ceil((camera.x+canvas.width)/TILE)+1;
+  const sr=Math.max(0,Math.floor(camera.y/TILE)-1),er=Math.min(CHUNK_H-1,Math.ceil((camera.y+canvas.height)/TILE)+1);
+  for(let r=sr;r<=er;r++)for(let c=sc;c<=ec;c++){
+    const b=getBlock(c,r);
+    if(b===BLOCK.AIR)continue;
+    if(b===BLOCK.DOOR_UPPER) continue;
+    const sx=c*TILE-camera.x,sy=r*TILE-camera.y;
+    const img=tileCanvasCache[b];
+    if(b===BLOCK.DOOR_LOWER){
+      if(img){
+        const doorOpen=isDoorOpen(c,r);
+        const doorW=doorOpen?TILE/4:TILE;
+        const doorH=TILE*2;
+        const doorX=sx;
+        const doorY=sy-TILE;
+        ctx.drawImage(img,0,0,img.width,img.height,doorX,doorY,doorW,doorH);
+        if(doorOpen){
+          ctx.fillStyle='rgba(255,255,255,0.15)';
+          ctx.fillRect(doorX,doorY,doorW,doorH);
+        }
+      }
+      continue;
+    }
+    if(img)ctx.drawImage(img,sx,sy,TILE,TILE);
+    else{ctx.fillStyle='#888';ctx.fillRect(sx,sy,TILE,TILE);}
+  }
+  const mc=Math.floor(mouseWorldX/TILE),mr=Math.floor(mouseWorldY/TILE);
+  if(mr>=0&&mr<CHUNK_H){
+    if(!boxInitialized){animWorldCol=mc;animWorldRow=mr;boxInitialized=true;}
+    animWorldCol+=(mc-animWorldCol)*BOX_LERP;
+    animWorldRow+=(mr-animWorldRow)*BOX_LERP;
+    if(Math.abs(mc-animWorldCol)<0.05)animWorldCol=mc;
+    if(Math.abs(mr-animWorldRow)<0.05)animWorldRow=mr;
+    const sx=animWorldCol*TILE-camera.x;
+    const sy=animWorldRow*TILE-camera.y;
+    ctx.strokeStyle='rgba(255,255,255,0.85)';ctx.lineWidth=2;
+    ctx.strokeRect(sx+1,sy+1,TILE-2,TILE-2);
+  }
+}
+function drawLightOverlay(){
+  const sc=Math.floor(camera.x/TILE)-1,ec=Math.ceil((camera.x+canvas.width)/TILE)+1;
+  const sr=Math.max(0,Math.floor(camera.y/TILE)-1),er=Math.min(CHUNK_H-1,Math.ceil((camera.y+canvas.height)/TILE)+1);
+  const envLight=dayLight*15;
+  for(let r=sr;r<=er;r++)for(let c=sc;c<=ec;c++){
+    const torchLight=getLight(c,r);
+    const finalLight=Math.max(torchLight,envLight);
+    const darkness=Math.max(0,1-finalLight/15);
+    const sx=c*TILE-camera.x,sy=r*TILE-camera.y;
+    if(darkness>0.02){
+      ctx.fillStyle='rgba(0,0,15,'+(darkness*0.85)+')';
+      ctx.fillRect(sx,sy,TILE,TILE);
+    }
+    if(torchLight>0){
+      const glow=Math.min(1,torchLight/14)*0.32;
+      ctx.fillStyle='rgba(255,255,255,'+glow+')';
+      ctx.fillRect(sx,sy,TILE,TILE);
+    }
+  }
+}
+function drawDrops(){
+  for(const d of drops){
+    const sx=d.x-camera.x,sy=d.y-camera.y;
+    if(sx<-40||sx>canvas.width+40||sy<-40||sy>canvas.height+40)continue;
+    const img=itemIconCache[d.type];
+    const bob=Math.sin(d.age*0.15)*2;
+    if(img)ctx.drawImage(img,sx-DROP_SIZE/2,sy-DROP_SIZE/2+bob,DROP_SIZE,DROP_SIZE);
+    if(d.count>1){
+      ctx.fillStyle='#fff';ctx.font='bold 12px '+FONT;
+      ctx.textAlign='right';ctx.textBaseline='bottom';
+      ctx.strokeStyle='#000';ctx.lineWidth=2;
+      const tx=sx+DROP_SIZE/2-2,ty=sy+DROP_SIZE/2-2;
+      ctx.strokeText(d.count,tx,ty);ctx.fillText(d.count,tx,ty);
+    }
+  }
+}
+function drawAnimals(){
+  for(const a of animals){
+    const sx=a.x-camera.x,sy=a.y-camera.y;
+    const img=a.type==='sheep'?sheepImage:chickenImage;
+    if(img&&img.complete){
+      ctx.save();ctx.imageSmoothingEnabled=false;
+      if(a.facing<0){ctx.translate(sx+a.w,sy);ctx.scale(-1,1);ctx.drawImage(img,0,0,a.w,a.h);}
+      else ctx.drawImage(img,sx,sy,a.w,a.h);
+      ctx.restore();
+    }
+  }
+}
+function drawPlayer(){
+  const sx=player.x-camera.x,sy=player.y-camera.y;
+  const sf=sneakAnim*0.15;
+  const drawH=player.h*(1-sf);
+  const drawY=sy+player.h-drawH;
+  if(playerSkin&&playerSkin.complete&&playerSkin.naturalWidth>0){
+    const drawW=drawH*playerSkinAspect;
+    const drawX=sx+player.w/2-drawW/2;
+    const needFlip=SPRITE_FACES_RIGHT?(player.facing<0):(player.facing>0);
+    ctx.save();ctx.imageSmoothingEnabled=false;
+    if(needFlip){ctx.translate(drawX+drawW,drawY);ctx.scale(-1,1);ctx.drawImage(playerSkin,0,0,drawW,drawH);}
+    else ctx.drawImage(playerSkin,drawX,drawY,drawW,drawH);
+    ctx.restore();
+  }else{
+    const pw=player.w,ph=drawH;
+    ctx.fillStyle='#c99a6c';ctx.fillRect(sx+pw*0.15,drawY,pw*0.7,ph*0.3);
+    ctx.fillStyle='#2d8a4e';ctx.fillRect(sx+pw*0.1,drawY+ph*0.3,pw*0.8,ph*0.4);
+    ctx.fillStyle='#3a5a8a';ctx.fillRect(sx+pw*0.15,drawY+ph*0.7,pw*0.3,ph*0.3);ctx.fillRect(sx+pw*0.55,drawY+ph*0.7,pw*0.3,ph*0.3);
+  }
+}
+function drawHealth(){
+  const hs=20,hearts=10,sx0=15,sy0=15;
+  for(let i=0;i<hearts;i++){
+    const hx=sx0+i*(hs+2),hy=sy0;
+    const hv=(i+1)*2,pv=i*2;
+    if(player.health>=hv){
+      if(heartIcon&&heartIcon.complete)ctx.drawImage(heartIcon,hx,hy,hs,hs);
+      else{ctx.fillStyle='#f33';ctx.beginPath();ctx.arc(hx+10,hy+10,8,0,Math.PI*2);ctx.fill();}
+    }else if(player.health>pv){
+      ctx.save();ctx.beginPath();ctx.rect(hx,hy,hs/2,hs);ctx.clip();
+      if(heartIcon&&heartIcon.complete)ctx.drawImage(heartIcon,hx,hy,hs,hs);
+      ctx.restore();
+      ctx.save();ctx.beginPath();ctx.rect(hx+hs/2,hy,hs/2,hs);ctx.clip();
+      ctx.globalAlpha=0.3;
+      if(heartIcon&&heartIcon.complete)ctx.drawImage(heartIcon,hx,hy,hs,hs);
+      ctx.restore();
+    }else{
+      ctx.save();ctx.globalAlpha=0.3;
+      if(heartIcon&&heartIcon.complete)ctx.drawImage(heartIcon,hx,hy,hs,hs);
+      ctx.restore();
+    }
+  }
+}
+function drawInventoryBar(){
+  const bar=getInventoryBarRect();
+  ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(bar.x,bar.y,bar.w,bar.h);
+  ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.lineWidth=2;ctx.strokeRect(bar.x,bar.y,bar.w,bar.h);
+  for(let i=0;i<INVENTORY_SIZE;i++){
+    const col=i%INV_COLS,row=Math.floor(i/INV_COLS);
+    const sx=bar.x+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP),sy=bar.y+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP);
+    ctx.fillStyle='rgba(80,80,110,0.4)';ctx.fillRect(sx,sy,SLOT_SIZE,SLOT_SIZE);
+    ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;ctx.strokeRect(sx,sy,SLOT_SIZE,SLOT_SIZE);
+    const item=inventory[i];
+    if(item){
+      const img=itemIconCache[item.type];
+      if(img)ctx.drawImage(img,sx+(SLOT_SIZE-32)/2,sy+(SLOT_SIZE-32)/2,32,32);
+      ctx.fillStyle='#fff';ctx.font='bold 14px '+FONT;
+      ctx.textAlign='right';ctx.textBaseline='bottom';
+      ctx.strokeStyle='#000';ctx.lineWidth=3;
+      ctx.strokeText(item.count,sx+SLOT_SIZE-3,sy+SLOT_SIZE-3);
+      ctx.fillText(item.count,sx+SLOT_SIZE-3,sy+SLOT_SIZE-3);
+    }
+  }
+  if(selectorInitialized){
+    ctx.strokeStyle='rgba(0,0,0,0.5)';ctx.lineWidth=4;ctx.strokeRect(selectorX+1,selectorY+1,SLOT_SIZE,SLOT_SIZE);
+    ctx.strokeStyle='#ffffff';ctx.lineWidth=3;ctx.strokeRect(selectorX,selectorY,SLOT_SIZE,SLOT_SIZE);
+  }
+}
+function drawDragging(){
+  if(!dragging)return;
+  const s=42,img=itemIconCache[dragging.item.type];
+  ctx.save();ctx.globalAlpha=0.9;
+  ctx.shadowColor='rgba(0,0,0,0.6)';ctx.shadowBlur=10;ctx.shadowOffsetY=4;
+  if(img)ctx.drawImage(img,dragging.x-s/2,dragging.y-s/2,s,s);
+  ctx.restore();
+}
+function drawRecipeList(L,recipes,title,hint){
+  ctx.fillStyle='rgba(30,30,50,0.96)';ctx.fillRect(L.x,L.y,L.w,Math.min(L.h,canvas.height*4));
+  ctx.strokeStyle='#8a8aaa';ctx.lineWidth=3;ctx.strokeRect(L.x,L.y,L.w,Math.min(L.h,canvas.height*4));
+  ctx.fillStyle='#fff';ctx.font='bold 18px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText(title,L.x+L.w/2,L.y+15);
+  const ic=28;
+  for(let i=0;i<recipes.length;i++){
+    const r=recipes[i],ry=L.recipeStartY+i*L.rowHeight;
+    const rx=L.x+15,rw=L.w-30,rh=L.rowHeight-4;
+    const cd=canCraft(r);
+    ctx.fillStyle=cd?'rgba(80,160,80,0.22)':'rgba(120,60,60,0.22)';ctx.fillRect(rx,ry,rw,rh);
+    ctx.strokeStyle=cd?'rgba(120,220,120,0.7)':'rgba(220,120,120,0.7)';ctx.lineWidth=2;ctx.strokeRect(rx,ry,rw,rh);
+    let cx=rx+15;const cy=ry+rh/2;
+    for(let j=0;j<r.inputs.length;j++){
+      const inp=r.inputs[j];
+      if(j>0){ctx.fillStyle='#fff';ctx.font='bold 18px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('+',cx+8,cy);cx+=22;}
+      const ii=itemIconCache[inp.type];
+      if(ii)ctx.drawImage(ii,cx,cy-ic/2,ic,ic);
+      cx+=ic+4;
+      ctx.fillStyle='#fff';ctx.font='bold 14px '+FONT;ctx.textAlign='left';ctx.textBaseline='middle';
+      ctx.fillText('×'+inp.count,cx,cy);cx+=30;
+    }
+    ctx.fillStyle='#ffcc00';ctx.font='bold 22px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('→',cx+10,cy);cx+=35;
+    const oi=itemIconCache[r.output.type];
+    if(oi)ctx.drawImage(oi,cx,cy-ic/2,ic,ic);
+    cx+=ic+4;
+    ctx.fillStyle='#fff';ctx.font='bold 14px '+FONT;ctx.textAlign='left';ctx.fillText('×'+r.output.count,cx,cy);
+  }
+  ctx.fillStyle='rgba(255,255,255,0.6)';ctx.font='13px '+FONT;ctx.textAlign='center';ctx.textBaseline='bottom';
+  ctx.fillText(hint,L.x+L.w/2,canvas.height-15);
+}
+function drawInventoryUI(){
+  const p=uiProgress.inventory;if(p<0.005)return;
+  const e=easeOutCubic(p),o=(1-e)*(canvas.height*0.7);
+  ctx.save();ctx.globalAlpha=e;ctx.translate(0,o);
+  drawRecipeList(getInventoryUILayout(),RECIPES.inventory,'背包 · 合成','点击配方合成 · 按 E 关闭');
+  ctx.restore();
+}
+function drawCraftingTableUI(){
+  const p=uiProgress.crafting;if(p<0.005)return;
+  const e=easeOutCubic(p),o=(1-e)*(canvas.height*0.7);
+  ctx.save();ctx.globalAlpha=e;ctx.translate(0,o);
+  drawRecipeList(getCraftingTableUILayout(),RECIPES.crafting,'工作台 · 合成','点击配方合成 · 按 E 关闭');
+  ctx.restore();
+}
+function drawFurnaceUI(){
+  const p=uiProgress.furnace;if(p<0.005)return;
+  const e=easeOutCubic(p),o=(1-e)*(canvas.height*0.7);
+  ctx.save();ctx.globalAlpha=e;ctx.translate(0,o);
+  drawRecipeList(getFurnaceUILayout(),RECIPES.furnace,'熔炉 · 烧炼','点击配方烧炼 · 按 E 关闭');
+  ctx.restore();
+}
+function drawCraftMessage(){
+  if(craftMessageTimer<=0)return;
+  craftMessageTimer--;
+  ctx.save();ctx.globalAlpha=Math.min(1,craftMessageTimer/30);
+  ctx.font='bold 16px '+FONT;
+  const tw=ctx.measureText(craftMessage).width+30;
+  ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(canvas.width/2-tw/2,70,tw,32);
+  ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(craftMessage,canvas.width/2,86);
+  ctx.restore();
+}
+function drawFullscreenTip(){
+  if(document.fullscreenElement)return;
+  if(!ctrlPressed)return;
+  const tw=240,th=80,tx=15,ty=canvas.height-120;
+  ctx.fillStyle='rgba(0,0,0,0.8)';ctx.fillRect(tx,ty,tw,th);
+  ctx.strokeStyle='rgba(255,255,255,0.3)';ctx.lineWidth=1;ctx.strokeRect(tx,ty,tw,th);
+  ctx.fillStyle='#fff';ctx.font='14px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText('建议全屏再进行疾跑',tx+tw/2,ty+15);
+  FULLSCREEN_BTN.x=tx+(tw-FULLSCREEN_BTN.w)/2;FULLSCREEN_BTN.y=ty+45;
+  ctx.fillStyle='#4a6a8a';ctx.fillRect(FULLSCREEN_BTN.x,FULLSCREEN_BTN.y,FULLSCREEN_BTN.w,FULLSCREEN_BTN.h);
+  ctx.strokeStyle='#8ab';ctx.strokeRect(FULLSCREEN_BTN.x,FULLSCREEN_BTN.y,FULLSCREEN_BTN.w,FULLSCREEN_BTN.h);
+  ctx.fillStyle='#fff';ctx.font='bold 14px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('全屏',FULLSCREEN_BTN.x+FULLSCREEN_BTN.w/2,FULLSCREEN_BTN.y+FULLSCREEN_BTN.h/2);
+}
+function drawLogo(){
+  if(!logoImage||!logoImage.complete||logoImage.naturalWidth<=0)return;
+  const a=logoImage.naturalWidth/logoImage.naturalHeight;
+  const w=120,h=w/a;
+  ctx.save();ctx.globalAlpha=0.9;ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(logoImage,canvas.width-w-15,40,w,h);
+  ctx.restore();
+}
+function drawTouchControls(){
+  if(!phoneMode||gameState!=='playing')return;
+  const size=50;
+  const padX=20,padY=canvas.height-200;
+  touchButtons={
+    left:{x:padX,y:padY+size,w:size,h:size},
+    right:{x:padX+size*2,y:padY+size,w:size,h:size},
+    up:{x:padX+size,y:padY,w:size,h:size},
+    down:{x:padX+size,y:padY+size*2,w:size,h:size},
+    sneak:{x:padX+size,y:padY+size*3,w:size,h:size},
+    sprint:{x:canvas.width-160,y:canvas.height-120,w:60,h:60},
+    jump:{x:canvas.width-80,y:canvas.height-120,w:60,h:60},
+    menu:{x:canvas.width/2-25,y:20,w:50,h:50}};
+  ctx.save();
+  for(const name in touchButtons){
+    const btn=touchButtons[name];
+    let active=touchActive[name];
+    if(name==='up')active=active||touchActive['jump'];
+    if(name==='down')active=active||touchActive['sneak'];
+    ctx.globalAlpha=active?0.7:0.4;
+    ctx.fillStyle=active?'#fff':'#000';
+    ctx.beginPath();ctx.arc(btn.x+btn.w/2,btn.y+btn.h/2,btn.w/2,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=0.9;
+    ctx.fillStyle='#fff';ctx.font='bold 20px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';
+    let sym='';
+    if(name==='left')sym='◀';else if(name==='right')sym='▶';
+    else if(name==='up')sym='▲';else if(name==='down')sym='▼';
+    else if(name==='jump')sym='⬆';else if(name==='sneak')sym='⬇';
+    else if(name==='sprint')sym='»';
+    else if(name==='menu')sym='三';
+    ctx.fillText(sym,btn.x+btn.w/2,btn.y+btn.h/2);
+  }
+  ctx.restore();
+}
+function drawLoadingScreen(){
+  if(loadingBgImage&&loadingBgImage.complete&&loadingBgImage.naturalWidth>0){
+    const iA=loadingBgImage.naturalWidth/loadingBgImage.naturalHeight,cA=canvas.width/canvas.height;
+    let dW,dH,dX,dY;
+    if(iA<cA){dW=canvas.width;dH=canvas.width/iA;dX=0;dY=(canvas.height-dH)/2;}
+    else{dH=canvas.height;dW=canvas.height*iA;dX=(canvas.width-dW)/2;dY=0;}
+    ctx.imageSmoothingEnabled=true;ctx.drawImage(loadingBgImage,dX,dY,dW,dH);
+  }else{ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);}
+  ctx.fillStyle='rgba(0,0,0,0.25)';ctx.fillRect(0,0,canvas.width,canvas.height);
+  if(loadingPhase==='download'){
+    ctx.fillStyle='#fff';ctx.font='bold 24px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('download file...',canvas.width/2,canvas.height/2-30);
+    const bw=300,bh=20;
+    const bx=(canvas.width-bw)/2,by=canvas.height/2+10;
+    ctx.fillStyle='rgba(255,255,255,0.2)';ctx.fillRect(bx,by,bw,bh);
+    ctx.fillStyle='#4a9';ctx.fillRect(bx,by,bw*(downloadProgress/Math.max(1,downloadTotal)),bh);
+    ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.strokeRect(bx,by,bw,bh);
+    ctx.fillStyle='#fff';ctx.font='14px '+FONT;
+    ctx.fillText(downloadProgress+' / '+downloadTotal,canvas.width/2,by+bh+20);
+  }else{
+    ctx.fillStyle='#fff';ctx.font='bold 28px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('please wait...',canvas.width/2,canvas.height/2);
+  }
+}
+function drawHUD(){
+  drawHealth();drawInventoryBar();drawFullscreenTip();drawLogo();
+  ctx.fillStyle='rgba(255,255,255,0.85)';ctx.font='14px '+FONT;ctx.textAlign='right';ctx.textBaseline='top';
+  const hourFloat=(12+(gameTime/DAY_LENGTH)*24)%24;
+  const hh=Math.floor(hourFloat);
+  const mm=Math.floor((hourFloat-hh)*60);
+  const timeStr=String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+  const ti=isNight?'☾':'☀';
+  ctx.fillText('X:'+Math.floor(player.x/TILE)+' Y:'+Math.floor(player.y/TILE)+'  ['+playerName+']  '+ti+' '+timeStr,canvas.width-15,15);
+}
+function drawLog(){
+  if(!logVisible)return;
+  const padding=10,lineHeight=18;
+  const logLines=[
+    '=== Debug Log ===',
+    'FPS: '+fps,
+    '坐标: '+Math.floor(player.x/TILE)+', '+Math.floor(player.y/TILE),
+    '速度: '+player.vx.toFixed(2)+', '+player.vy.toFixed(2),
+    '区块: '+Math.floor(player.x/(CHUNK_W*TILE)),
+    '已加载区块: '+chunks.size,
+    '生物: '+animals.length,
+    '掉落物: '+drops.length,
+    '下落方块: '+fallingBlocks.length,
+    '树苗: '+saplings.size,
+    '光照: '+getLight(Math.floor(player.x/TILE),Math.floor(player.y/TILE)),
+    '天色: '+dayLight.toFixed(2)+(isNight?' (夜)':' (昼)'),
+    '时间: '+gameTime+'/'+DAY_LENGTH,
+    '时刻: '+function(){const hf=(12+(gameTime/DAY_LENGTH)*24)%24;const h=Math.floor(hf);const m=Math.floor((hf-h)*60);return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');}(),
+    '游戏状态: '+gameState,
+    '创造模式: '+(player.creativeMode?'是':'否'),
+    '手机模式: '+(phoneMode?'是':'否'),
+    '背包物品: '+inventory.filter(x=>x).length+'/'+INVENTORY_SIZE,
+    '门状态: '+doorStates.size,
+    '',
+    '按 Shift+Enter+F3 关闭日志'];
+  const w=320,h=logLines.length*lineHeight+padding*2;
+  const x=10,y=10;
+  ctx.fillStyle='rgba(0,0,0,0.85)';ctx.fillRect(x,y,w,h);
+  ctx.strokeStyle='rgba(120,220,120,0.8)';ctx.lineWidth=2;ctx.strokeRect(x,y,w,h);
+  ctx.fillStyle='#7fff7f';ctx.font='13px monospace';ctx.textAlign='left';ctx.textBaseline='top';
+  for(let i=0;i<logLines.length;i++)ctx.fillText(logLines[i],x+padding,y+padding+i*lineHeight);
+}
+function drawMenuBackground(){
+  if(menuBgImage&&menuBgImage.complete&&menuBgImage.naturalWidth>0){
+    const iA=menuBgImage.naturalWidth/menuBgImage.naturalHeight,cA=canvas.width/canvas.height;
+    let dW,dH,dX,dY;
+    if(iA<cA){dW=canvas.width;dH=canvas.width/iA;dX=0;dY=(canvas.height-dH)/2;}
+    else{dH=canvas.height;dW=canvas.height*iA;dX=(canvas.width-dW)/2;dY=0;}
+    ctx.imageSmoothingEnabled=true;ctx.drawImage(menuBgImage,dX,dY,dW,dH);
+  }else{ctx.fillStyle='#0a0a1a';ctx.fillRect(0,0,canvas.width,canvas.height);}
+  ctx.fillStyle='rgba(0,0,0,0.45)';ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+function drawMenuButton(btn,enabled){
+  const hovered=enabled&&pointInRect(mouseX,mouseY,btn.x,btn.y,btn.w,btn.h);
+  ctx.save();
+  let img=null;
+  if(!enabled&&btnDisabled&&btnDisabled.complete)img=btnDisabled;
+  else if(hovered&&btnHover&&btnHover.complete)img=btnHover;
+  else if(btnNormal&&btnNormal.complete)img=btnNormal;
+  if(img){ctx.imageSmoothingEnabled=false;ctx.drawImage(img,0,0,img.naturalWidth,img.naturalHeight,btn.x,btn.y,btn.w,btn.h);}
+  else{
+    if(!enabled){ctx.fillStyle='rgba(60,60,60,0.85)';ctx.fillRect(btn.x,btn.y,btn.w,btn.h);ctx.strokeStyle='rgba(120,120,120,0.6)';ctx.lineWidth=2;ctx.strokeRect(btn.x,btn.y,btn.w,btn.h);}
+    else if(hovered){ctx.fillStyle='rgba(120,130,160,0.95)';ctx.fillRect(btn.x,btn.y,btn.w,btn.h);ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(btn.x,btn.y,btn.w,btn.h);}
+    else{ctx.fillStyle='rgba(70,75,100,0.9)';ctx.fillRect(btn.x,btn.y,btn.w,btn.h);ctx.strokeStyle='rgba(200,200,220,0.7)';ctx.lineWidth=2;ctx.strokeRect(btn.x,btn.y,btn.w,btn.h);}
+  }
+  ctx.fillStyle=enabled?'#fff':'rgba(180,180,180,0.7)';
+  ctx.font='bold 18px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(btn.label,btn.x+btn.w/2,btn.y+btn.h/2);
+  ctx.restore();
+}
+function drawMainMenu(){
+  let lb=0;
+  if(logoImage&&logoImage.complete&&logoImage.naturalWidth>0){
+    const lA=logoImage.naturalWidth/logoImage.naturalHeight;
+    const lW=Math.min(360,canvas.width*0.45),lH=lW/lA;
+    const lX=(canvas.width-lW)/2,lY=canvas.height*0.12;
+    ctx.imageSmoothingEnabled=true;ctx.drawImage(logoImage,lX,lY,lW,lH);
+    lb=lY+lH;
+  }else lb=canvas.height*0.18+30;
+  const bw=Math.min(400,canvas.width*0.55),bh=44,gap=8;
+  const fy=lb+50,cx=(canvas.width-bw)/2;
+  MENU_BUTTONS.singleplayer.x=cx;MENU_BUTTONS.singleplayer.y=fy;MENU_BUTTONS.singleplayer.w=bw;MENU_BUTTONS.singleplayer.h=bh;
+  MENU_BUTTONS.multiplayer.x=cx;MENU_BUTTONS.multiplayer.y=fy+(bh+gap);MENU_BUTTONS.multiplayer.w=bw;MENU_BUTTONS.multiplayer.h=bh;
+  MENU_BUTTONS.options.x=cx;MENU_BUTTONS.options.y=fy+(bh+gap)*3;MENU_BUTTONS.options.w=bw;MENU_BUTTONS.options.h=bh;
+  MENU_BUTTONS.editName.x=cx;MENU_BUTTONS.editName.y=fy+(bh+gap)*4;MENU_BUTTONS.editName.w=bw;MENU_BUTTONS.editName.h=bh;
+  drawMenuButton(MENU_BUTTONS.singleplayer,true);
+  drawMenuButton(MENU_BUTTONS.multiplayer,false);
+  drawMenuButton(MENU_BUTTONS.options,true);
+  drawMenuButton(MENU_BUTTONS.editName,true);
+  ctx.fillStyle='rgba(255,255,255,0.55)';ctx.font='12px '+FONT;ctx.textAlign='center';ctx.textBaseline='bottom';
+  ctx.fillText('当前用户名：'+playerName,canvas.width/2,MENU_BUTTONS.editName.y+MENU_BUTTONS.editName.h+20);
+}
+function drawSavesScreen(){
+  ctx.fillStyle='#fff';ctx.font='bold 32px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText('单人游戏',canvas.width/2,canvas.height*0.1);
+  const iw=Math.min(600,canvas.width*0.7),ih=120;
+  SAVE_INPUT.x=(canvas.width-iw)/2;SAVE_INPUT.y=canvas.height*0.22;SAVE_INPUT.w=iw;SAVE_INPUT.h=ih;
+  ctx.fillStyle='rgba(255,255,255,0.85)';ctx.font='14px '+FONT;ctx.textAlign='left';ctx.textBaseline='top';
+  ctx.fillText('粘贴存档代码（Ctrl+V）：',SAVE_INPUT.x,SAVE_INPUT.y-22);
+  ctx.fillStyle='rgba(10,10,20,0.9)';ctx.fillRect(SAVE_INPUT.x,SAVE_INPUT.y,iw,ih);
+  ctx.strokeStyle='#8a8aaa';ctx.lineWidth=2;ctx.strokeRect(SAVE_INPUT.x,SAVE_INPUT.y,iw,ih);
+  ctx.fillStyle='#8f8';ctx.font='11px monospace';ctx.textAlign='left';ctx.textBaseline='top';
+  const dc=saveCodeInputText.slice(-720);
+  const lines=[];
+  for(let i=0;i<dc.length;i+=60)lines.push(dc.slice(i,i+60));
+  const ml=6,si=Math.max(0,lines.length-ml);
+  for(let i=0;i<Math.min(lines.length,ml);i++)ctx.fillText(lines[si+i]||'',SAVE_INPUT.x+8,SAVE_INPUT.y+8+i*16);
+  if(inputErrorTimer>0){inputErrorTimer--;ctx.fillStyle='#f55';ctx.font='bold 14px '+FONT;ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText(inputErrorMsg,canvas.width/2,SAVE_INPUT.y+ih+25);}
+  const bw=200,bh=44,gap=12;
+  const tw=bw*3+gap*2,sx=(canvas.width-tw)/2,by=SAVE_INPUT.y+ih+60;
+  MENU_BUTTONS.loadSave.x=sx;MENU_BUTTONS.loadSave.y=by;MENU_BUTTONS.loadSave.w=bw;MENU_BUTTONS.loadSave.h=bh;
+  MENU_BUTTONS.newWorld.x=sx+bw+gap;MENU_BUTTONS.newWorld.y=by;MENU_BUTTONS.newWorld.w=bw;MENU_BUTTONS.newWorld.h=bh;
+  MENU_BUTTONS.back.x=sx+(bw+gap)*2;MENU_BUTTONS.back.y=by;MENU_BUTTONS.back.w=bw;MENU_BUTTONS.back.h=bh;
+  drawMenuButton(MENU_BUTTONS.loadSave,true);
+  drawMenuButton(MENU_BUTTONS.newWorld,true);
+  drawMenuButton(MENU_BUTTONS.back,true);
+}
+function drawCreateWorldScreen(){
+  ctx.fillStyle='#fff';ctx.font='bold 32px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText('创建新世界',canvas.width/2,canvas.height*0.15);
+  const iw=Math.min(400,canvas.width*0.55),ih=44;
+  SEED_INPUT.x=(canvas.width-iw)/2;SEED_INPUT.y=canvas.height*0.35;SEED_INPUT.w=iw;SEED_INPUT.h=ih;
+  ctx.fillStyle='rgba(255,255,255,0.85)';ctx.font='16px '+FONT;ctx.textAlign='center';ctx.textBaseline='bottom';
+  ctx.fillText('世界种子（留空随机，1~10^14）：',canvas.width/2,SEED_INPUT.y-10);
+  ctx.fillStyle='rgba(10,10,20,0.9)';ctx.fillRect(SEED_INPUT.x,SEED_INPUT.y,iw,ih);
+  ctx.strokeStyle='#8a8aaa';ctx.lineWidth=2;ctx.strokeRect(SEED_INPUT.x,SEED_INPUT.y,iw,ih);
+  ctx.fillStyle='#fff';ctx.font='bold 18px '+FONT;ctx.textAlign='left';ctx.textBaseline='middle';
+  const cb=Math.floor(Date.now()/500)%2===0;
+  ctx.fillText(seedInputText+(cb?'_':''),SEED_INPUT.x+12,SEED_INPUT.y+ih/2);
+  const bw=200,bh=44,gap=12,tw=bw*2+gap,sx=(canvas.width-tw)/2,by=canvas.height*0.55;
+  MENU_BUTTONS.createOk.x=sx;MENU_BUTTONS.createOk.y=by;MENU_BUTTONS.createOk.w=bw;MENU_BUTTONS.createOk.h=bh;
+  MENU_BUTTONS.createBack.x=sx+bw+gap;MENU_BUTTONS.createBack.y=by;MENU_BUTTONS.createBack.w=bw;MENU_BUTTONS.createBack.h=bh;
+  drawMenuButton(MENU_BUTTONS.createOk,true);
+  drawMenuButton(MENU_BUTTONS.createBack,true);
+}
+function drawOptionsMenu(){
+  ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='#fff';ctx.font='bold 28px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText('选项',canvas.width/2,canvas.height*0.15);
+  const label='手机模式：'+(phoneMode?'是':'否');
+  const pb={x:canvas.width/2-150,y:canvas.height*0.35,w:300,h:44,label,enabled:true};
+  drawMenuButton(pb,true);
+  const bw=200,bh=44;
+  DONE_BTN.x=(canvas.width-bw)/2;DONE_BTN.y=canvas.height*0.7;DONE_BTN.w=bw;DONE_BTN.h=bh;
+  drawMenuButton({...DONE_BTN,label:'完成',enabled:true},true);
+}
+function drawNameEditor(){
+  ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='#fff';ctx.font='bold 28px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText('编辑玩家信息',canvas.width/2,canvas.height*0.18);
+  const iw=Math.min(400,canvas.width*0.55),ih=44;
+  NAME_INPUT.x=(canvas.width-iw)/2;NAME_INPUT.y=canvas.height*0.35;NAME_INPUT.w=iw;NAME_INPUT.h=ih;
+  ctx.fillStyle='rgba(20,20,40,0.9)';ctx.fillRect(NAME_INPUT.x,NAME_INPUT.y,iw,ih);
+  ctx.strokeStyle='#8a8aaa';ctx.lineWidth=2;ctx.strokeRect(NAME_INPUT.x,NAME_INPUT.y,iw,ih);
+  ctx.fillStyle='#fff';ctx.font='bold 18px '+FONT;ctx.textAlign='left';ctx.textBaseline='middle';
+  const cb=Math.floor(Date.now()/500)%2===0;
+  ctx.fillText(nameInputText+(cb?'_':''),NAME_INPUT.x+12,NAME_INPUT.y+ih/2);
+  ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='12px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText('支持 Ctrl+V 粘贴 · 回车确认 · Esc 取消',canvas.width/2,NAME_INPUT.y+ih+15);
+  const bw=200,bh=44;
+  DONE_BTN.x=(canvas.width-bw)/2;DONE_BTN.y=canvas.height*0.62;DONE_BTN.w=bw;DONE_BTN.h=bh;
+  drawMenuButton({...DONE_BTN,label:'完成',enabled:true},true);
+}
+function drawInGameMenu(){
+  ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(0,0,canvas.width,canvas.height);
+  if(showOptionsMenu){
+    ctx.fillStyle='#fff';ctx.font='bold 28px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
+    ctx.fillText('选项',canvas.width/2,canvas.height*0.15);
+    const label='手机模式：'+(phoneMode?'是':'否');
+    const pb={x:canvas.width/2-150,y:canvas.height*0.35,w:300,h:44,label,enabled:true};
+    drawMenuButton(pb,true);
+    const bw=200,bh=44;
+    DONE_BTN.x=(canvas.width-bw)/2;DONE_BTN.y=canvas.height*0.7;DONE_BTN.w=bw;DONE_BTN.h=bh;
+    drawMenuButton({...DONE_BTN,label:'完成',enabled:true},true);
+    return;
+  }
+  ctx.fillStyle='#fff';ctx.font='bold 32px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText('游戏菜单',canvas.width/2,canvas.height*0.2);
+  const bw=Math.min(400,canvas.width*0.55),bh=44,gap=8;
+  const fy=canvas.height*0.35,cx=(canvas.width-bw)/2;
+  MENU_BUTTONS.resume.x=cx;MENU_BUTTONS.resume.y=fy;MENU_BUTTONS.resume.w=bw;MENU_BUTTONS.resume.h=bh;
+  MENU_BUTTONS.gameOptions.x=cx;MENU_BUTTONS.gameOptions.y=fy+(bh+gap);MENU_BUTTONS.gameOptions.w=bw;MENU_BUTTONS.gameOptions.h=bh;
+  MENU_BUTTONS.saveQuit.x=cx;MENU_BUTTONS.saveQuit.y=fy+(bh+gap)*2;MENU_BUTTONS.saveQuit.w=bw;MENU_BUTTONS.saveQuit.h=bh;
+  drawMenuButton(MENU_BUTTONS.resume,true);
+  drawMenuButton(MENU_BUTTONS.gameOptions,true);
+  drawMenuButton(MENU_BUTTONS.saveQuit,true);
+}
+function drawMenuScreen(){
+  const e=easeOutCubic(menuSlide);
+  const ox=(1-e)*canvas.width;
+  ctx.save();ctx.translate(ox,0);
+  drawMenuBackground();
+  if(showNameEditor){drawMainMenu();drawNameEditor();}
+  else if(showOptionsMenu){drawMainMenu();drawOptionsMenu();}
+  else if(gameState==='menu')drawMainMenu();
+  else if(gameState==='saves')drawSavesScreen();
+  else if(gameState==='createWorld')drawCreateWorldScreen();
+  ctx.restore();
+}
+function gameLoop(){
+  frameCount++;
+  const now=Date.now();
+  if(now-lastFpsTime>=1000){
+    fps=frameCount;
+    frameCount=0;
+    lastFpsTime=now;
+  }
+  if(isLoading){ctx.clearRect(0,0,canvas.width,canvas.height);drawLoadingScreen();requestAnimationFrame(gameLoop);return;}
+  if(loadingAlpha>0){loadingAlpha-=LOADING_FADE_SPEED;if(loadingAlpha<0)loadingAlpha=0;}
+  if(gameState!=='playing'&&menuSlide<1)menuSlide=Math.min(1,menuSlide+0.08);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(gameState!=='playing'){
+    drawMenuScreen();
+    if(loadingAlpha>0){ctx.save();ctx.globalAlpha=loadingAlpha;drawLoadingScreen();ctx.restore();}
+    requestAnimationFrame(gameLoop);return;
+  }
+  uiProgress.inventory+=((showInventory?1:0)-uiProgress.inventory)*UI_ANIM_SPEED;
+  uiProgress.crafting+=((showCraftingTable?1:0)-uiProgress.crafting)*UI_ANIM_SPEED;
+  uiProgress.furnace+=((showFurnace?1:0)-uiProgress.furnace)*UI_ANIM_SPEED;
+  updateSelectorAnim();
+  if(!showInGameMenu){
+    updatePhysics();
+    updateDrops();
+    updateFallingBlocks();
+    updateSaplings();
+    updateAnimals();
+    updateAnimalSpawning();
+    updateTime();
+  }
+  updateCamera();
+  unloadFarChunks();
+  drawBackground();
+  drawWorld();
+  drawAnimals();
+  drawDrops();
+  drawPlayer();
+  drawLightOverlay();
+  drawHUD();
+  drawInventoryUI();
+  drawCraftingTableUI();
+  drawFurnaceUI();
+  drawCraftMessage();
+  drawDragging();
+  drawTouchControls();
+  if(showInGameMenu)drawInGameMenu();
+  drawLog();
+  if(loadingAlpha>0){ctx.save();ctx.globalAlpha=loadingAlpha;drawLoadingScreen();ctx.restore();}
+  requestAnimationFrame(gameLoop);
+}
+function start(){
+  const s=getSurfaceHeight(8);
+  player.x=8*TILE;player.y=(s-2)*TILE;
+  loadingStartTime=Date.now();
+  let cachedTime=0;
+  try{cachedTime=parseInt(localStorage.getItem(CACHE_KEY)||'0');}catch(e){}
+  loadingPhase=(cachedTime&&(Date.now()-cachedTime)<CACHE_DURATION)?'wait':'download';
+  loadTextures(()=>{
+    loadingPhase='wait';
+    const el=Date.now()-loadingStartTime;
+    const rem=Math.max(0,MIN_LOADING_TIME-el);
+    setTimeout(()=>{isLoading=false;gameState='menu';menuSlide=0;},rem);
+  });
+  lastFpsTime=Date.now();
+  gameLoop();
+}
+start();
+})();
+</script>
+</body>
+</html>
