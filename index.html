@@ -97,11 +97,8 @@ function playPlaceSound(){
     const bufSize=Math.floor(ac.sampleRate*dur);
     const buf=ac.createBuffer(1,bufSize,ac.sampleRate);
     const data=buf.getChannelData(0);
-    for(let i=0;i<bufSize;i++){
-      data[i]=(Math.random()*2-1)*Math.pow(1-i/bufSize,2.5);
-    }
-    const src=ac.createBufferSource();
-    src.buffer=buf;
+    for(let i=0;i<bufSize;i++){data[i]=(Math.random()*2-1)*Math.pow(1-i/bufSize,2.5);}
+    const src=ac.createBufferSource();src.buffer=buf;
     const filter=ac.createBiquadFilter();
     filter.type='lowpass';
     filter.frequency.setValueAtTime(900,now);
@@ -111,9 +108,7 @@ function playPlaceSound(){
     g1.gain.exponentialRampToValueAtTime(0.0005,now+dur);
     src.connect(filter).connect(g1).connect(ac.destination);
     src.start(now);src.stop(now+dur);
-
-    const osc=ac.createOscillator();
-    const g2=ac.createGain();
+    const osc=ac.createOscillator();const g2=ac.createGain();
     osc.type='sine';
     osc.frequency.setValueAtTime(130,now);
     osc.frequency.exponentialRampToValueAtTime(65,now+dur);
@@ -131,11 +126,8 @@ function playBreakSound(){
     const bufSize=Math.floor(ac.sampleRate*dur);
     const buf=ac.createBuffer(1,bufSize,ac.sampleRate);
     const data=buf.getChannelData(0);
-    for(let i=0;i<bufSize;i++){
-      data[i]=(Math.random()*2-1)*Math.pow(1-i/bufSize,1.8);
-    }
-    const src=ac.createBufferSource();
-    src.buffer=buf;
+    for(let i=0;i<bufSize;i++){data[i]=(Math.random()*2-1)*Math.pow(1-i/bufSize,1.8);}
+    const src=ac.createBufferSource();src.buffer=buf;
     const filter=ac.createBiquadFilter();
     filter.type='bandpass';
     filter.frequency.setValueAtTime(1600,now);
@@ -251,11 +243,52 @@ const DONE_BTN={x:0,y:0,w:200,h:44};
 const NAME_INPUT={x:0,y:0,w:400,h:44};
 const SEED_INPUT={x:0,y:0,w:400,h:44};
 const SAVE_INPUT={x:0,y:0,w:500,h:140};
+/* ★ 粘贴按钮位置（动态计算，初始为 0） */
+const NAME_PASTE_BTN={x:0,y:0,w:88,h:44};
+const SEED_PASTE_BTN={x:0,y:0,w:88,h:44};
+const SAVE_PASTE_BTN={x:0,y:0,w:100,h:36};
 
 function encodeSave(d){try{return btoa(unescape(encodeURIComponent(JSON.stringify(d))));}catch(e){return'';}}
 function decodeSave(c){try{return JSON.parse(decodeURIComponent(escape(atob(c.trim().replace(/\s/g,'')))));}catch(e){return null;}}
 function easeOutCubic(t){return 1-Math.pow(1-t,3);}
 function lerpColor(c1,c2,t){return[Math.round(c1[0]+(c2[0]-c1[0])*t),Math.round(c1[1]+(c2[1]-c1[1])*t),Math.round(c1[2]+(c2[2]-c1[2])*t)];}
+
+/* ===== ★ 手机端粘贴辅助 ===== */
+async function doPasteToInput(target){
+  let text='';
+  try{
+    if(navigator.clipboard && navigator.clipboard.readText){
+      text = await navigator.clipboard.readText();
+    }
+  }catch(e){ text=''; }
+  if(!text){
+    try{ text = window.prompt('请粘贴内容：','')||''; }catch(e){ text=''; }
+  }
+  if(!text)return;
+  if(target==='name'){
+    text=text.replace(/[\x00-\x1f\x7f]/g,'');
+    if(nameInputText.length+text.length>16)text=text.slice(0,16-nameInputText.length);
+    nameInputText+=text;
+  }else if(target==='save'){
+    saveCodeInputText+=text;
+  }else if(target==='seed'){
+    text=text.replace(/[^0-9\-]/g,'');
+    if(seedInputText.length+text.length>20)text=text.slice(0,20-seedInputText.length);
+    seedInputText+=text;
+  }
+}
+/* 绘制通用粘贴按钮 */
+function drawPasteButton(btn,active){
+  ctx.fillStyle=active?'#5a8a5a':'#4a6a8a';
+  ctx.fillRect(btn.x,btn.y,btn.w,btn.h);
+  ctx.strokeStyle=active?'#8fc':'#8ab';
+  ctx.lineWidth=2;
+  ctx.strokeRect(btn.x,btn.y,btn.w,btn.h);
+  ctx.fillStyle='#fff';
+  ctx.font='bold 16px '+FONT;
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('粘贴',btn.x+btn.w/2,btn.y+btn.h/2);
+}
 
 function createFallbackTile(type){
   const c=document.createElement('canvas');c.width=TILE;c.height=TILE;
@@ -679,7 +712,6 @@ document.addEventListener('keydown',e=>{
     if(showInGameMenu)return;
     if(key==='q'&&!e.repeat){if(showInventory||showCraftingTable||showFurnace)return;dropSelectedItem();return;}
     if(key==='e'&&!e.repeat){if(showInventory||showCraftingTable||showFurnace){showInventory=false;showCraftingTable=false;showFurnace=false;}else showInventory=true;}
-    /* ★ H 键切换物品栏显示/隐藏 */
     if(key==='h'&&!e.repeat){inventoryBarHidden=!inventoryBarHidden;return;}
     if(e.key>='1'&&e.key<='9'&&!e.repeat){const n=parseInt(e.key)-1;const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=r*INV_COLS+n;}
     if(key==='z'&&!e.repeat){const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=((r-1+INV_ROWS)%INV_ROWS)*INV_COLS;}
@@ -710,16 +742,13 @@ function resize(){
 window.addEventListener('resize',resize);
 resize();
 
-function screenToWorld(mx,my){
-  return {x: camera.x + mx, y: camera.y + my};
-}
+function screenToWorld(mx,my){return {x: camera.x + mx, y: camera.y + my};}
 
 /* ===================== 手机模式交互逻辑 ===================== */
 
 function isFunctionalBlock(b){
   return b===BLOCK.CRAFTING||b===BLOCK.FURNACE||b===BLOCK.LIT_FURNACE||b===BLOCK.BED||b===BLOCK.DOOR_LOWER||b===BLOCK.DOOR_UPPER;
 }
-
 function breakBlockAt(worldCol,worldRow){
   const block=getBlock(worldCol,worldRow);
   if(block===BLOCK.AIR||block===BLOCK.BEDROCK||block===BLOCK.DOOR_UPPER)return;
@@ -739,7 +768,6 @@ function breakBlockAt(worldCol,worldRow){
     if(di!==undefined&&di!==null)spawnDrop(worldCol,worldRow,di,1);
   }
 }
-
 function interactFunctionalBlock(worldCol,worldRow){
   const block=getBlock(worldCol,worldRow);
   if(block===BLOCK.CRAFTING){showCraftingTable=true;showInventory=false;showFurnace=false;}
@@ -750,11 +778,9 @@ function interactFunctionalBlock(worldCol,worldRow){
     if(key2){const cur=doorStates.get(key2)===true;doorStates.set(key2,!cur);}
   }
 }
-
 function phoneWorldDown(mx,my){
   const wp=screenToWorld(mx,my);
   const wx=wp.x, wy=wp.y;
-
   for(const a of animals){
     if(wx>=a.x&&wx<=a.x+a.w&&wy>=a.y&&wy<=a.y+a.h){
       a.health-=4;
@@ -762,29 +788,21 @@ function phoneWorldDown(mx,my){
       return;
     }
   }
-
   const worldCol=Math.floor(wx/TILE);
   const worldRow=Math.floor(wy/TILE);
   const block=getBlock(worldCol,worldRow);
   const overlap=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
-
   if(block!==BLOCK.AIR){
     if(overlap)return;
     if(block===BLOCK.BEDROCK)return;
     if(block===BLOCK.DOOR_UPPER)return;
     if(isFunctionalBlock(block)){
       const touchYInTile=wy-worldRow*TILE;
-      if(touchYInTile<TILE/2){
-        breakBlockAt(worldCol,worldRow);
-      }else{
-        interactFunctionalBlock(worldCol,worldRow);
-      }
-    }else{
-      breakBlockAt(worldCol,worldRow);
-    }
+      if(touchYInTile<TILE/2){breakBlockAt(worldCol,worldRow);}
+      else{interactFunctionalBlock(worldCol,worldRow);}
+    }else{breakBlockAt(worldCol,worldRow);}
     return;
   }
-
   if(overlap)return;
   const item=inventory[selectedSlot];
   if(!item)return;
@@ -801,9 +819,7 @@ function phoneWorldDown(mx,my){
     setBlock(worldCol,worldRow,BLOCK.DOOR_LOWER);
     setBlock(worldCol,worldRow-1,BLOCK.DOOR_UPPER);
     doorStates.set(worldCol+','+worldRow,false);
-  }else{
-    setBlock(worldCol,worldRow,pb);
-  }
+  }else{setBlock(worldCol,worldRow,pb);}
   playPlaceSound();
   if(pb===BLOCK.SAND||pb===BLOCK.GRAVEL){
     const below=getBlock(worldCol,worldRow+1);
@@ -814,7 +830,6 @@ function phoneWorldDown(mx,my){
   }
   item.count--;if(item.count<=0)inventory[selectedSlot]=null;
 }
-
 function hitTestTouchButtons(mx,my){
   for(const name in touchButtons){
     const btn=touchButtons[name];
@@ -822,13 +837,10 @@ function hitTestTouchButtons(mx,my){
   }
   return null;
 }
-
 function handleTouchGame(mx,my){
   if(showInGameMenu){
     if(showOptionsMenu){
-      if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){
-        phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;
-      }
+      if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;}
       if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h)){showOptionsMenu=false;return;}
       return;
     }
@@ -842,7 +854,6 @@ function handleTouchGame(mx,my){
     }
     return;
   }
-
   if(showInventory||showCraftingTable||showFurnace){
     let L=null,recipes=null,progress=0;
     if(showInventory){L=getInventoryUILayout();recipes=RECIPES.inventory;progress=uiProgress.inventory;}
@@ -853,18 +864,13 @@ function handleTouchGame(mx,my){
     if(mx>=uiLeft&&mx<=uiRight){
       for(let i=0;i<recipes.length;i++){
         const ryScreen=L.recipeStartY+i*L.rowHeight+o;
-        if(pointInRect(mx,my,L.x+15,ryScreen,L.w-30,L.rowHeight-4)){
-          doCraft(recipes[i]);
-          return;
-        }
+        if(pointInRect(mx,my,L.x+15,ryScreen,L.w-30,L.rowHeight-4)){doCraft(recipes[i]);return;}
       }
       return;
     }
     showInventory=false;showCraftingTable=false;showFurnace=false;
     return;
   }
-
-  /* ★ 物品栏隐藏时不响应点击物品栏 */
   if(!inventoryBarHidden){
     const bar=getInventoryBarRect();
     if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
@@ -872,13 +878,16 @@ function handleTouchGame(mx,my){
       if(slot>=0){selectedSlot=slot;return;}
     }
   }
-
   phoneWorldDown(mx,my);
 }
-
+/* ★ 手机端菜单触摸：包含粘贴按钮检测 */
 function handleTouchMenu(mx,my,ox){
   const mmx=mx-ox;
   if(showNameEditor){
+    /* ★ 粘贴按钮 */
+    if(pointInRect(mmx,my,NAME_PASTE_BTN.x,NAME_PASTE_BTN.y,NAME_PASTE_BTN.w,NAME_PASTE_BTN.h)){
+      doPasteToInput('name');return;
+    }
     if(pointInRect(mmx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h)){
       if(nameInputText.trim().length>0){playerName=nameInputText.trim();localStorage.setItem('mc2d_name',playerName);}
       showNameEditor=false;
@@ -886,18 +895,24 @@ function handleTouchMenu(mx,my,ox){
     return;
   }
   if(showOptionsMenu){
-    if(pointInRect(mmx,my,canvas.width/2-150,canvas.height*0.35,300,44)){
-      phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;
-    }
+    if(pointInRect(mmx,my,canvas.width/2-150,canvas.height*0.35,300,44)){phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;}
     if(pointInRect(mmx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))showOptionsMenu=false;
     return;
   }
   if(gameState==='createWorld'){
+    /* ★ 粘贴按钮 */
+    if(pointInRect(mmx,my,SEED_PASTE_BTN.x,SEED_PASTE_BTN.y,SEED_PASTE_BTN.w,SEED_PASTE_BTN.h)){
+      doPasteToInput('seed');return;
+    }
     if(pointInRect(mmx,my,MENU_BUTTONS.createOk.x,MENU_BUTTONS.createOk.y,MENU_BUTTONS.createOk.w,MENU_BUTTONS.createOk.h))createWorldFromSeed();
     if(pointInRect(mmx,my,MENU_BUTTONS.createBack.x,MENU_BUTTONS.createBack.y,MENU_BUTTONS.createBack.w,MENU_BUTTONS.createBack.h)){gameState='saves';menuSlide=0;}
     return;
   }
   if(gameState==='saves'){
+    /* ★ 粘贴按钮 */
+    if(pointInRect(mmx,my,SAVE_PASTE_BTN.x,SAVE_PASTE_BTN.y,SAVE_PASTE_BTN.w,SAVE_PASTE_BTN.h)){
+      doPasteToInput('save');return;
+    }
     if(pointInRect(mmx,my,MENU_BUTTONS.loadSave.x,MENU_BUTTONS.loadSave.y,MENU_BUTTONS.loadSave.w,MENU_BUTTONS.loadSave.h)){tryLoadSaveCode();return;}
     if(pointInRect(mmx,my,MENU_BUTTONS.newWorld.x,MENU_BUTTONS.newWorld.y,MENU_BUTTONS.newWorld.w,MENU_BUTTONS.newWorld.h)){seedInputText='';gameState='createWorld';menuSlide=0;return;}
     if(pointInRect(mmx,my,MENU_BUTTONS.back.x,MENU_BUTTONS.back.y,MENU_BUTTONS.back.w,MENU_BUTTONS.back.h)){gameState='menu';menuSlide=0;return;}
@@ -910,32 +925,19 @@ function handleTouchMenu(mx,my,ox){
     return;
   }
 }
-
 function handlePhoneButtonPress(btnName,touchId){
-  if(btnName==='menu'){
-    showInGameMenu=true;
-    return;
-  }
+  if(btnName==='menu'){showInGameMenu=true;return;}
   if(btnName==='inventory'){
-    if(showInventory){
-      showInventory=false;
-    }else{
-      showInventory=true;
-      showCraftingTable=false;
-      showFurnace=false;
-    }
+    if(showInventory){showInventory=false;}
+    else{showInventory=true;showCraftingTable=false;showFurnace=false;}
     return;
   }
-  if(btnName==='hideInv'){
-    inventoryBarHidden=!inventoryBarHidden;
-    return;
-  }
+  if(btnName==='hideInv'){inventoryBarHidden=!inventoryBarHidden;return;}
   touchActive[btnName]=true;
   if(touchId!==undefined)activeTouchMap[touchId]=btnName;
   else phoneActiveButton=btnName;
 }
 
-/* ===== 触摸事件 ===== */
 canvas.addEventListener('touchstart',e=>{
   if(!phoneMode)return;
   e.preventDefault();
@@ -943,14 +945,11 @@ canvas.addEventListener('touchstart',e=>{
   for(const t of e.changedTouches){
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
-
     if(gameState==='playing'&&!showInGameMenu){
       const btnName=hitTestTouchButtons(mx,my);
       if(btnName){
         handlePhoneButtonPress(btnName,t.identifier);
-        if(btnName==='menu'||btnName==='inventory'||btnName==='hideInv'){
-          touchActive[btnName]=false;
-        }
+        if(btnName==='menu'||btnName==='inventory'||btnName==='hideInv'){touchActive[btnName]=false;}
         continue;
       }
       handleTouchGame(mx,my);
@@ -965,56 +964,35 @@ canvas.addEventListener('touchstart',e=>{
     }
   }
 },{passive:false});
-
 function releaseTouchById(touchId){
   const name=activeTouchMap[touchId];
-  if(name){
-    touchActive[name]=false;
-    delete activeTouchMap[touchId];
-  }
+  if(name){touchActive[name]=false;delete activeTouchMap[touchId];}
 }
-
 function releaseAllTouchButtons(){
-  for(const id in activeTouchMap){
-    touchActive[activeTouchMap[id]]=false;
-    delete activeTouchMap[id];
-  }
-  touchActive['left']=false;
-  touchActive['right']=false;
-  touchActive['up']=false;
-  touchActive['down']=false;
-  touchActive['jump']=false;
-  touchActive['sneak']=false;
-  touchActive['sprint']=false;
+  for(const id in activeTouchMap){touchActive[activeTouchMap[id]]=false;delete activeTouchMap[id];}
+  touchActive['left']=false;touchActive['right']=false;
+  touchActive['up']=false;touchActive['down']=false;
+  touchActive['jump']=false;touchActive['sneak']=false;touchActive['sprint']=false;
 }
-
 canvas.addEventListener('touchend',e=>{
   if(!phoneMode)return;
   e.preventDefault();
   lastTouchTime=Date.now();
-  for(const t of e.changedTouches){
-    releaseTouchById(t.identifier);
-  }
-  if(Object.keys(activeTouchMap).length===0){
-    releaseAllTouchButtons();
-  }
+  for(const t of e.changedTouches){releaseTouchById(t.identifier);}
+  if(Object.keys(activeTouchMap).length===0){releaseAllTouchButtons();}
 },{passive:false});
-
 canvas.addEventListener('touchcancel',e=>{
   if(!phoneMode)return;
   e.preventDefault();
-  for(const t of e.changedTouches){
-    releaseTouchById(t.identifier);
-  }
-  if(Object.keys(activeTouchMap).length===0){
-    releaseAllTouchButtons();
-  }
+  for(const t of e.changedTouches){releaseTouchById(t.identifier);}
+  if(Object.keys(activeTouchMap).length===0){releaseAllTouchButtons();}
 },{passive:false});
 
 function isButtonClick(mx,my){
   if(gameState==='menu'){
     if(showNameEditor){
       if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))return true;
+      if(pointInRect(mx,my,NAME_PASTE_BTN.x,NAME_PASTE_BTN.y,NAME_PASTE_BTN.w,NAME_PASTE_BTN.h))return true;
       return false;
     }
     if(showOptionsMenu){
@@ -1031,11 +1009,13 @@ function isButtonClick(mx,my){
     if(pointInRect(mx,my,MENU_BUTTONS.loadSave.x,MENU_BUTTONS.loadSave.y,MENU_BUTTONS.loadSave.w,MENU_BUTTONS.loadSave.h))return true;
     if(pointInRect(mx,my,MENU_BUTTONS.newWorld.x,MENU_BUTTONS.newWorld.y,MENU_BUTTONS.newWorld.w,MENU_BUTTONS.newWorld.h))return true;
     if(pointInRect(mx,my,MENU_BUTTONS.back.x,MENU_BUTTONS.back.y,MENU_BUTTONS.back.w,MENU_BUTTONS.back.h))return true;
+    if(pointInRect(mx,my,SAVE_PASTE_BTN.x,SAVE_PASTE_BTN.y,SAVE_PASTE_BTN.w,SAVE_PASTE_BTN.h))return true;
     return false;
   }
   if(gameState==='createWorld'){
     if(pointInRect(mx,my,MENU_BUTTONS.createOk.x,MENU_BUTTONS.createOk.y,MENU_BUTTONS.createOk.w,MENU_BUTTONS.createOk.h))return true;
     if(pointInRect(mx,my,MENU_BUTTONS.createBack.x,MENU_BUTTONS.createBack.y,MENU_BUTTONS.createBack.w,MENU_BUTTONS.createBack.h))return true;
+    if(pointInRect(mx,my,SEED_PASTE_BTN.x,SEED_PASTE_BTN.y,SEED_PASTE_BTN.w,SEED_PASTE_BTN.h))return true;
     return false;
   }
   if(gameState==='playing'&&showInGameMenu){
@@ -1051,7 +1031,6 @@ function isButtonClick(mx,my){
   return false;
 }
 
-/* ===== 鼠标事件 ===== */
 canvas.addEventListener('mousemove',e=>{
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
@@ -1089,46 +1068,44 @@ canvas.addEventListener('mousedown',e=>{
     const btnName=hitTestTouchButtons(mx,my);
     if(btnName){
       handlePhoneButtonPress(btnName);
-      if(btnName==='menu'||btnName==='inventory'||btnName==='hideInv'){
-        touchActive[btnName]=false;
-        phoneActiveButton=null;
-      }
+      if(btnName==='menu'||btnName==='inventory'||btnName==='hideInv'){touchActive[btnName]=false;phoneActiveButton=null;}
       return;
     }
     handleTouchGame(mx,my);
     return;
   }
-
   if(!showInGameMenu&&!document.fullscreenElement&&gameState==='playing'){
     if(pointInRect(mx,my,FULLSCREEN_BTN.x,FULLSCREEN_BTN.y,FULLSCREEN_BTN.w,FULLSCREEN_BTN.h)){
       document.documentElement.requestFullscreen();return;
     }
   }
   if((gameState==='menu'||gameState==='saves'||gameState==='createWorld')&&showOptionsMenu){
-    if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){
-      phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;
-    }
+    if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;}
     if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))showOptionsMenu=false;
     return;
   }
   if(gameState==='menu'||gameState==='saves'||gameState==='createWorld'){
     if(showNameEditor){
+      /* ★ 粘贴按钮 */
+      if(pointInRect(mx,my,NAME_PASTE_BTN.x,NAME_PASTE_BTN.y,NAME_PASTE_BTN.w,NAME_PASTE_BTN.h)){doPasteToInput('name');return;}
       if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h)){if(nameInputText.trim().length>0){playerName=nameInputText.trim();localStorage.setItem('mc2d_name',playerName);}showNameEditor=false;}
       return;
     }
     if(showOptionsMenu){
-      if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){
-        phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;
-      }
+      if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;}
       if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))showOptionsMenu=false;
       return;
     }
     if(gameState==='createWorld'){
+      /* ★ 粘贴按钮 */
+      if(pointInRect(mx,my,SEED_PASTE_BTN.x,SEED_PASTE_BTN.y,SEED_PASTE_BTN.w,SEED_PASTE_BTN.h)){doPasteToInput('seed');return;}
       if(pointInRect(mx,my,MENU_BUTTONS.createOk.x,MENU_BUTTONS.createOk.y,MENU_BUTTONS.createOk.w,MENU_BUTTONS.createOk.h))createWorldFromSeed();
       if(pointInRect(mx,my,MENU_BUTTONS.createBack.x,MENU_BUTTONS.createBack.y,MENU_BUTTONS.createBack.w,MENU_BUTTONS.createBack.h)){gameState='saves';menuSlide=0;}
       return;
     }
     if(gameState==='saves'){
+      /* ★ 粘贴按钮 */
+      if(pointInRect(mx,my,SAVE_PASTE_BTN.x,SAVE_PASTE_BTN.y,SAVE_PASTE_BTN.w,SAVE_PASTE_BTN.h)){doPasteToInput('save');return;}
       if(pointInRect(mx,my,MENU_BUTTONS.loadSave.x,MENU_BUTTONS.loadSave.y,MENU_BUTTONS.loadSave.w,MENU_BUTTONS.loadSave.h)){tryLoadSaveCode();return;}
       if(pointInRect(mx,my,MENU_BUTTONS.newWorld.x,MENU_BUTTONS.newWorld.y,MENU_BUTTONS.newWorld.w,MENU_BUTTONS.newWorld.h)){seedInputText='';gameState='createWorld';menuSlide=0;return;}
       if(pointInRect(mx,my,MENU_BUTTONS.back.x,MENU_BUTTONS.back.y,MENU_BUTTONS.back.w,MENU_BUTTONS.back.h)){gameState='menu';menuSlide=0;return;}
@@ -1142,9 +1119,7 @@ canvas.addEventListener('mousedown',e=>{
   if(gameState!=='playing'||isLoading)return;
   if(showInGameMenu){
     if(showOptionsMenu){
-      if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){
-        phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;
-      }
+      if(pointInRect(mx,my,canvas.width/2-150,canvas.height*0.35,300,44)){phoneMode=!phoneMode;localStorage.setItem('mc2d_phone',phoneMode?'1':'0');return;}
       if(pointInRect(mx,my,DONE_BTN.x,DONE_BTN.y,DONE_BTN.w,DONE_BTN.h))showOptionsMenu=false;
       return;
     }
@@ -1185,7 +1160,6 @@ canvas.addEventListener('mousedown',e=>{
     }
     if(showFurnace)return;
   }
-  /* ★ 物品栏隐藏时不响应鼠标点击物品栏格子 */
   if(e.button===0 && !inventoryBarHidden){
     const bar=getInventoryBarRect();
     if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
@@ -1265,7 +1239,6 @@ canvas.addEventListener('mouseup',e=>{
   if(!dragging)return;
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
-  /* 若物品栏隐藏，松手时把物品放回原位 */
   if(inventoryBarHidden){inventory[dragging.fromSlot]=dragging.item;dragging=null;return;}
   const target=getSlotAtPoint(mx,my);
   if(target>=0&&target!==dragging.fromSlot){
@@ -1275,24 +1248,10 @@ canvas.addEventListener('mouseup',e=>{
   }else inventory[dragging.fromSlot]=dragging.item;
   dragging=null;
 });
-
-canvas.addEventListener('mouseleave',e=>{
-  releaseAllTouchButtons();
-  phoneActiveButton=null;
-});
-
-window.addEventListener('blur',()=>{
-  releaseAllTouchButtons();
-  phoneActiveButton=null;
-  for(const k in keys)keys[k]=false;
-});
-
-document.getElementById('saveConfirmBtn').addEventListener('click',()=>{
-  allowClose=true;location.reload();
-});
-document.getElementById('saveCancelBtn').addEventListener('click',()=>{
-  document.getElementById('saveOverlay').style.display='none';
-});
+canvas.addEventListener('mouseleave',e=>{releaseAllTouchButtons();phoneActiveButton=null;});
+window.addEventListener('blur',()=>{releaseAllTouchButtons();phoneActiveButton=null;for(const k in keys)keys[k]=false;});
+document.getElementById('saveConfirmBtn').addEventListener('click',()=>{allowClose=true;location.reload();});
+document.getElementById('saveCancelBtn').addEventListener('click',()=>{document.getElementById('saveOverlay').style.display='none';});
 function spawnDrop(wc,wr,t,c){
   if(t===null||t===undefined)return;
   drops.push({x:wc*TILE+TILE/2,y:wr*TILE+TILE/2,vx:(Math.random()-0.5)*2.5,vy:-3-Math.random()*1.5,type:t,count:c||1,age:0,onGround:false,pickupDelay:0});
@@ -1523,15 +1482,8 @@ function drawBackground(){
   const nightTop=[10,10,46],nightBot=[42,42,78];
   const sunsetTop=[255,140,84],sunsetBot=[255,204,136];
   let top,bot;
-  if(dayLight>0.5){
-    const t=(dayLight-0.5)*2;
-    top=lerpColor(sunsetTop,dayTop,t);
-    bot=lerpColor(sunsetBot,dayBot,t);
-  }else{
-    const t=dayLight*2;
-    top=lerpColor(nightTop,sunsetTop,t);
-    bot=lerpColor(nightBot,sunsetBot,t);
-  }
+  if(dayLight>0.5){const t=(dayLight-0.5)*2;top=lerpColor(sunsetTop,dayTop,t);bot=lerpColor(sunsetBot,dayBot,t);}
+  else{const t=dayLight*2;top=lerpColor(nightTop,sunsetTop,t);bot=lerpColor(nightBot,sunsetBot,t);}
   const g=ctx.createLinearGradient(0,0,0,canvas.height);
   g.addColorStop(0,'rgb('+top[0]+','+top[1]+','+top[2]+')');
   g.addColorStop(1,'rgb('+bot[0]+','+bot[1]+','+bot[2]+')');
@@ -1551,13 +1503,9 @@ function drawWorld(){
         const doorOpen=isDoorOpen(c,r);
         const doorW=doorOpen?TILE/4:TILE;
         const doorH=TILE*2;
-        const doorX=sx;
-        const doorY=sy-TILE;
+        const doorX=sx,doorY=sy-TILE;
         ctx.drawImage(img,0,0,img.width,img.height,doorX,doorY,doorW,doorH);
-        if(doorOpen){
-          ctx.fillStyle='rgba(255,255,255,0.15)';
-          ctx.fillRect(doorX,doorY,doorW,doorH);
-        }
+        if(doorOpen){ctx.fillStyle='rgba(255,255,255,0.15)';ctx.fillRect(doorX,doorY,doorW,doorH);}
       }
       continue;
     }
@@ -1586,15 +1534,8 @@ function drawLightOverlay(){
     const finalLight=Math.max(torchLight,envLight);
     const darkness=Math.max(0,1-finalLight/15);
     const sx=c*TILE-camera.x,sy=r*TILE-camera.y;
-    if(darkness>0.02){
-      ctx.fillStyle='rgba(0,0,15,'+(darkness*0.85)+')';
-      ctx.fillRect(sx,sy,TILE,TILE);
-    }
-    if(torchLight>0){
-      const glow=Math.min(1,torchLight/14)*0.32;
-      ctx.fillStyle='rgba(255,255,255,'+glow+')';
-      ctx.fillRect(sx,sy,TILE,TILE);
-    }
+    if(darkness>0.02){ctx.fillStyle='rgba(0,0,15,'+(darkness*0.85)+')';ctx.fillRect(sx,sy,TILE,TILE);}
+    if(torchLight>0){const glow=Math.min(1,torchLight/14)*0.32;ctx.fillStyle='rgba(255,255,255,'+glow+')';ctx.fillRect(sx,sy,TILE,TILE);}
   }
 }
 function drawDrops(){
@@ -1669,7 +1610,6 @@ function drawHealth(){
   }
 }
 function drawInventoryBar(){
-  /* ★ 物品栏隐藏时不绘制 */
   if(inventoryBarHidden)return;
   const bar=getInventoryBarRect();
   ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(bar.x,bar.y,bar.w,bar.h);
@@ -1811,7 +1751,6 @@ function drawTouchControls(){
     if(name==='up')active=active||touchActive['jump'];
     if(name==='down')active=active||touchActive['sneak'];
     if(name==='inventory')active=showInventory;
-    /* ★ 隐藏按钮：物品栏隐藏时高亮显示 */
     if(name==='hideInv')active=inventoryBarHidden;
     ctx.globalAlpha=active?0.7:0.4;
     ctx.fillStyle=active?'#fff':'#000';
@@ -1952,8 +1891,13 @@ function drawSavesScreen(){
   ctx.fillText('单人游戏',canvas.width/2,canvas.height*0.1);
   const iw=Math.min(600,canvas.width*0.7),ih=120;
   SAVE_INPUT.x=(canvas.width-iw)/2;SAVE_INPUT.y=canvas.height*0.22;SAVE_INPUT.w=iw;SAVE_INPUT.h=ih;
+  /* ★ 存档粘贴按钮放在输入框右上角 */
+  SAVE_PASTE_BTN.x=SAVE_INPUT.x+iw-SAVE_PASTE_BTN.w-6;
+  SAVE_PASTE_BTN.y=SAVE_INPUT.y-42;
+  SAVE_PASTE_BTN.w=100;SAVE_PASTE_BTN.h=36;
   ctx.fillStyle='rgba(255,255,255,0.85)';ctx.font='14px '+FONT;ctx.textAlign='left';ctx.textBaseline='top';
   ctx.fillText('粘贴存档代码（Ctrl+V）：',SAVE_INPUT.x,SAVE_INPUT.y-22);
+  drawPasteButton(SAVE_PASTE_BTN,false);
   ctx.fillStyle='rgba(10,10,20,0.9)';ctx.fillRect(SAVE_INPUT.x,SAVE_INPUT.y,iw,ih);
   ctx.strokeStyle='#8a8aaa';ctx.lineWidth=2;ctx.strokeRect(SAVE_INPUT.x,SAVE_INPUT.y,iw,ih);
   ctx.fillStyle='#8f8';ctx.font='11px monospace';ctx.textAlign='left';ctx.textBaseline='top';
@@ -1976,7 +1920,13 @@ function drawCreateWorldScreen(){
   ctx.fillStyle='#fff';ctx.font='bold 32px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
   ctx.fillText('创建新世界',canvas.width/2,canvas.height*0.15);
   const iw=Math.min(400,canvas.width*0.55),ih=44;
-  SEED_INPUT.x=(canvas.width-iw)/2;SEED_INPUT.y=canvas.height*0.35;SEED_INPUT.w=iw;SEED_INPUT.h=ih;
+  /* ★ 输入框 + 粘贴按钮并排居中 */
+  const gap=8;
+  const totalW=iw+gap+SEED_PASTE_BTN.w;
+  const startX=(canvas.width-totalW)/2;
+  SEED_INPUT.x=startX;SEED_INPUT.y=canvas.height*0.35;SEED_INPUT.w=iw;SEED_INPUT.h=ih;
+  SEED_PASTE_BTN.x=startX+iw+gap;SEED_PASTE_BTN.y=SEED_INPUT.y;
+  SEED_PASTE_BTN.w=88;SEED_PASTE_BTN.h=ih;
   ctx.fillStyle='rgba(255,255,255,0.85)';ctx.font='16px '+FONT;ctx.textAlign='center';ctx.textBaseline='bottom';
   ctx.fillText('世界种子（留空随机，1~10^14）：',canvas.width/2,SEED_INPUT.y-10);
   ctx.fillStyle='rgba(10,10,20,0.9)';ctx.fillRect(SEED_INPUT.x,SEED_INPUT.y,iw,ih);
@@ -1984,9 +1934,10 @@ function drawCreateWorldScreen(){
   ctx.fillStyle='#fff';ctx.font='bold 18px '+FONT;ctx.textAlign='left';ctx.textBaseline='middle';
   const cb=Math.floor(Date.now()/500)%2===0;
   ctx.fillText(seedInputText+(cb?'_':''),SEED_INPUT.x+12,SEED_INPUT.y+ih/2);
-  const bw=200,bh=44,gap=12,tw=bw*2+gap,sx=(canvas.width-tw)/2,by=canvas.height*0.55;
+  drawPasteButton(SEED_PASTE_BTN,false);
+  const bw=200,bh=44,gap2=12,tw=bw*2+gap2,sx=(canvas.width-tw)/2,by=canvas.height*0.55;
   MENU_BUTTONS.createOk.x=sx;MENU_BUTTONS.createOk.y=by;MENU_BUTTONS.createOk.w=bw;MENU_BUTTONS.createOk.h=bh;
-  MENU_BUTTONS.createBack.x=sx+bw+gap;MENU_BUTTONS.createBack.y=by;MENU_BUTTONS.createBack.w=bw;MENU_BUTTONS.createBack.h=bh;
+  MENU_BUTTONS.createBack.x=sx+bw+gap2;MENU_BUTTONS.createBack.y=by;MENU_BUTTONS.createBack.w=bw;MENU_BUTTONS.createBack.h=bh;
   drawMenuButton(MENU_BUTTONS.createOk,true);
   drawMenuButton(MENU_BUTTONS.createBack,true);
 }
@@ -2006,12 +1957,19 @@ function drawNameEditor(){
   ctx.fillStyle='#fff';ctx.font='bold 28px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
   ctx.fillText('编辑玩家信息',canvas.width/2,canvas.height*0.18);
   const iw=Math.min(400,canvas.width*0.55),ih=44;
-  NAME_INPUT.x=(canvas.width-iw)/2;NAME_INPUT.y=canvas.height*0.35;NAME_INPUT.w=iw;NAME_INPUT.h=ih;
+  /* ★ 输入框 + 粘贴按钮并排居中 */
+  const gap=8;
+  const totalW=iw+gap+NAME_PASTE_BTN.w;
+  const startX=(canvas.width-totalW)/2;
+  NAME_INPUT.x=startX;NAME_INPUT.y=canvas.height*0.35;NAME_INPUT.w=iw;NAME_INPUT.h=ih;
+  NAME_PASTE_BTN.x=startX+iw+gap;NAME_PASTE_BTN.y=NAME_INPUT.y;
+  NAME_PASTE_BTN.w=88;NAME_PASTE_BTN.h=ih;
   ctx.fillStyle='rgba(20,20,40,0.9)';ctx.fillRect(NAME_INPUT.x,NAME_INPUT.y,iw,ih);
   ctx.strokeStyle='#8a8aaa';ctx.lineWidth=2;ctx.strokeRect(NAME_INPUT.x,NAME_INPUT.y,iw,ih);
   ctx.fillStyle='#fff';ctx.font='bold 18px '+FONT;ctx.textAlign='left';ctx.textBaseline='middle';
   const cb=Math.floor(Date.now()/500)%2===0;
   ctx.fillText(nameInputText+(cb?'_':''),NAME_INPUT.x+12,NAME_INPUT.y+ih/2);
+  drawPasteButton(NAME_PASTE_BTN,false);
   ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='12px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
   ctx.fillText('支持 Ctrl+V 粘贴 · 回车确认 · Esc 取消',canvas.width/2,NAME_INPUT.y+ih+15);
   const bw=200,bh=44;
@@ -2057,11 +2015,7 @@ function drawMenuScreen(){
 function gameLoop(){
   frameCount++;
   const now=Date.now();
-  if(now-lastFpsTime>=1000){
-    fps=frameCount;
-    frameCount=0;
-    lastFpsTime=now;
-  }
+  if(now-lastFpsTime>=1000){fps=frameCount;frameCount=0;lastFpsTime=now;}
   if(isLoading){ctx.clearRect(0,0,canvas.width,canvas.height);drawLoadingScreen();requestAnimationFrame(gameLoop);return;}
   if(loadingAlpha>0){loadingAlpha-=LOADING_FADE_SPEED;if(loadingAlpha<0)loadingAlpha=0;}
   if(gameState!=='playing'&&menuSlide<1)menuSlide=Math.min(1,menuSlide+0.08);
@@ -2076,29 +2030,13 @@ function gameLoop(){
   uiProgress.furnace+=((showFurnace?1:0)-uiProgress.furnace)*UI_ANIM_SPEED;
   updateSelectorAnim();
   if(!showInGameMenu){
-    updatePhysics();
-    updateDrops();
-    updateFallingBlocks();
-    updateSaplings();
-    updateAnimals();
-    updateAnimalSpawning();
-    updateTime();
+    updatePhysics();updateDrops();updateFallingBlocks();updateSaplings();
+    updateAnimals();updateAnimalSpawning();updateTime();
   }
-  updateCamera();
-  unloadFarChunks();
-  drawBackground();
-  drawWorld();
-  drawAnimals();
-  drawDrops();
-  drawPlayer();
-  drawLightOverlay();
-  drawHUD();
-  drawInventoryUI();
-  drawCraftingTableUI();
-  drawFurnaceUI();
-  drawCraftMessage();
-  drawDragging();
-  drawTouchControls();
+  updateCamera();unloadFarChunks();
+  drawBackground();drawWorld();drawAnimals();drawDrops();drawPlayer();
+  drawLightOverlay();drawHUD();drawInventoryUI();drawCraftingTableUI();
+  drawFurnaceUI();drawCraftMessage();drawDragging();drawTouchControls();
   if(showInGameMenu)drawInGameMenu();
   drawLog();
   if(loadingAlpha>0){ctx.save();ctx.globalAlpha=loadingAlpha;drawLoadingScreen();ctx.restore();}
