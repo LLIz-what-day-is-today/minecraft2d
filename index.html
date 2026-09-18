@@ -60,6 +60,8 @@ const touchActive={};
 let touchButtons={},phoneActiveButton=null;
 const doorStates=new Map();
 const activeTouchMap={};
+/* ★ 触摸/鼠标光圈：跟随手指/鼠标移动 */
+const touchRipples=new Map();
 
 let lastLeftTapTime=0;
 let lastRightTapTime=0;
@@ -312,7 +314,6 @@ function drawDeleteButton(btn,active){
   ctx.fillText('⇠',btn.x+btn.w/2,btn.y+btn.h/2);
 }
 
-/* ★ 缺失材质：紫黑相间棋盘格 */
 function createFallbackTile(type){
   const c=document.createElement('canvas');c.width=TILE;c.height=TILE;
   const ctx=c.getContext('2d');
@@ -324,7 +325,6 @@ function createFallbackTile(type){
   ctx.fillRect(cell,cell,cell,cell);
   return c;
 }
-/* ★ 物品图标：加载成功用图片；未加载统一紫黑棋盘格（不再手搓） */
 function createItemIcon(itemType){
   const c=document.createElement('canvas');c.width=32;c.height=32;
   const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=false;
@@ -957,6 +957,7 @@ canvas.addEventListener('touchstart',e=>{
   for(const t of e.changedTouches){
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
+    touchRipples.set(t.identifier,{x:mx,y:my,startTime:Date.now()});
     if(gameState==='playing'&&!showInGameMenu){
       const btnName=hitTestTouchButtons(mx,my);
       if(btnName){
@@ -972,6 +973,17 @@ canvas.addEventListener('touchstart',e=>{
       if(isButtonClick(mmx,my))playBtnSound();
       handleTouchMenu(mx,my,ox);
     }else{handleTouchGame(mx,my);}
+  }
+},{passive:false});
+/* ★ 触摸移动：更新光圈位置，跟随手指 */
+canvas.addEventListener('touchmove',e=>{
+  if(!phoneMode)return;
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    const rect=canvas.getBoundingClientRect();
+    const mx=t.clientX-rect.left,my=t.clientY-rect.top;
+    const r=touchRipples.get(t.identifier);
+    if(r){r.x=mx;r.y=my;}
   }
 },{passive:false});
 function releaseTouchById(touchId){
@@ -994,13 +1006,19 @@ canvas.addEventListener('touchend',e=>{
   if(!phoneMode)return;
   e.preventDefault();
   lastTouchTime=Date.now();
-  for(const t of e.changedTouches){releaseTouchById(t.identifier);}
+  for(const t of e.changedTouches){
+    releaseTouchById(t.identifier);
+    touchRipples.delete(t.identifier);
+  }
   if(Object.keys(activeTouchMap).length===0){releaseAllTouchButtons();}
 },{passive:false});
 canvas.addEventListener('touchcancel',e=>{
   if(!phoneMode)return;
   e.preventDefault();
-  for(const t of e.changedTouches){releaseTouchById(t.identifier);}
+  for(const t of e.changedTouches){
+    releaseTouchById(t.identifier);
+    touchRipples.delete(t.identifier);
+  }
   if(Object.keys(activeTouchMap).length===0){releaseAllTouchButtons();}
 },{passive:false});
 
@@ -1057,6 +1075,9 @@ canvas.addEventListener('mousemove',e=>{
   const wp=screenToWorld(mx,my);
   mouseWorldX=wp.x;mouseWorldY=wp.y;
   if(dragging){dragging.x=mx;dragging.y=my;}
+  /* ★ 鼠标光圈跟随鼠标移动 */
+  const mr=touchRipples.get('mouse');
+  if(mr){mr.x=mx;mr.y=my;}
   if(gameState==='playing'&&!showInGameMenu&&!showInventory&&!showCraftingTable&&!showFurnace){
     canvas.style.cursor='crosshair';
   }else{
@@ -1081,6 +1102,7 @@ canvas.addEventListener('mousedown',e=>{
   e.preventDefault();
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  if(phoneMode&&gameState==='playing')touchRipples.set('mouse',{x:mx,y:my,startTime:Date.now()});
   if(isButtonClick(mx,my))playBtnSound();
   if(phoneMode&&gameState==='playing'&&!showInGameMenu){
     const btnName=hitTestTouchButtons(mx,my);
@@ -1253,6 +1275,7 @@ canvas.addEventListener('mousedown',e=>{
 canvas.addEventListener('mouseup',e=>{
   releaseAllTouchButtons();
   phoneActiveButton=null;
+  touchRipples.delete('mouse');
   if(gameState!=='playing'||isLoading)return;
   if(!dragging)return;
   const rect=canvas.getBoundingClientRect();
@@ -1266,8 +1289,8 @@ canvas.addEventListener('mouseup',e=>{
   }else inventory[dragging.fromSlot]=dragging.item;
   dragging=null;
 });
-canvas.addEventListener('mouseleave',e=>{releaseAllTouchButtons();phoneActiveButton=null;});
-window.addEventListener('blur',()=>{releaseAllTouchButtons();phoneActiveButton=null;for(const k in keys)keys[k]=false;});
+canvas.addEventListener('mouseleave',e=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');});
+window.addEventListener('blur',()=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');for(const k in keys)keys[k]=false;});
 document.getElementById('saveConfirmBtn').addEventListener('click',()=>{allowClose=true;location.reload();});
 document.getElementById('saveCancelBtn').addEventListener('click',()=>{document.getElementById('saveOverlay').style.display='none';});
 function spawnDrop(wc,wr,t,c){
@@ -1419,12 +1442,10 @@ function isInLadder(px,py,pw,ph){
   for(let y=t;y<=b;y++)for(let x=l;x<=r;x++)if(getBlock(x,y)===BLOCK.LADDER)return true;
   return false;
 }
-/* ★ 蹲下防滑落：检查移动后玩家脚部边缘是否仍有支撑 */
 function isSupportedAhead(dx){
   if(dx===0)return true;
   const footY=player.y+player.h+1;
   const newX=player.x+dx;
-  /* 前进方向的边缘（-0.01 保证"最后一像素"允许） */
   const edgeX=dx>0?(newX+player.w-0.01):newX;
   const col=Math.floor(edgeX/TILE);
   const row=Math.floor(footY/TILE);
@@ -1462,7 +1483,6 @@ function updatePhysics(){
     let blocks=getBlocksInRect(player.x,player.y,player.w,player.h);
     for(const b of blocks){if(dx>0)player.x=b.col*TILE-player.w;else if(dx<0)player.x=b.col*TILE+TILE;}
     if(onLadder){
-      /* ★ 梯子上也有重力，但速度减半 */
       const upKey=touchActive['jump']||touchActive['up']||keys['w']||keys[' ']||keys['arrowup'];
       const downKey=touchActive['sneak']||touchActive['down']||keys['s']||keys['shift']||keys['arrowdown'];
       if(upKey)player.vy=-3;
@@ -1717,6 +1737,30 @@ function drawItemTooltip(){
   ctx.textAlign='center';ctx.textBaseline='middle';
   ctx.fillText(name,tx+tw/2,ty+th/2);
   ctx.restore();
+}
+/* ★ 基岩版风格光圈：白色半透明圆点，跟随手指/鼠标移动 */
+function drawTouchRipples(){
+  if(!phoneMode)return;
+  if(gameState!=='playing')return;
+  if(showInGameMenu)return;
+  for(const [id,t] of touchRipples){
+    const r=22;
+    ctx.save();
+    ctx.fillStyle='rgba(255,255,255,0.25)';
+    ctx.beginPath();
+    ctx.arc(t.x,t.y,r,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.45)';
+    ctx.beginPath();
+    ctx.arc(t.x,t.y,r*0.55,0,Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.55)';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.arc(t.x,t.y,r,0,Math.PI*2);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 function drawRecipeList(L,recipes,title,hint){
   ctx.fillStyle='rgba(30,30,50,0.96)';ctx.fillRect(L.x,L.y,L.w,Math.min(L.h,canvas.height*4));
@@ -2145,6 +2189,7 @@ function gameLoop(){
   drawHUD();drawInventoryUI();drawCraftingTableUI();
   drawFurnaceUI();drawCraftMessage();drawDragging();drawTouchControls();
   drawItemTooltip();
+  drawTouchRipples();
   if(showInGameMenu)drawInGameMenu();
   drawLog();
   if(loadingAlpha>0){ctx.save();ctx.globalAlpha=loadingAlpha;drawLoadingScreen();ctx.restore();}
