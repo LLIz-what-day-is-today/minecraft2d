@@ -147,7 +147,6 @@ let lastTouchTime=0;
 const BLOCK={AIR:0,GRASS:1,DIRT:2,STONE:3,LOG:4,LEAVES:5,PLANKS:6,COBBLE:7,GLASS:8,CRAFTING:9,FURNACE:10,LIT_FURNACE:11,SAND:12,GRAVEL:13,COAL_ORE:14,IRON_ORE:15,GOLD_ORE:16,DIAMOND_ORE:17,BEDROCK:18,TORCH:19,DOOR_LOWER:20,DOOR_UPPER:21,LADDER:22,SAPLING:23,BED:24,WOOL:25};
 const ITEM={BLOCK_GRASS:100,BLOCK_DIRT:101,BLOCK_STONE:102,BLOCK_LOG:103,BLOCK_LEAVES:104,BLOCK_PLANKS:105,BLOCK_COBBLE:106,BLOCK_GLASS:107,BLOCK_CRAFTING:108,BLOCK_FURNACE:109,BLOCK_SAND:110,BLOCK_GRAVEL:111,COAL:200,CHARCOAL:201,STONE_ITEM:202,RAW_IRON:300,RAW_GOLD:301,DIAMOND:302,STICK:400,TORCH:401,DOOR:402,LADDER:403,SAPLING:404,APPLE:405,BED:406,WOOL:407,RAW_MUTTON:500,COOKED_MUTTON:501,RAW_CHICKEN:502,COOKED_CHICKEN:503};
 
-/* ★ 物品名映射 */
 const ITEM_NAMES={
   [ITEM.BLOCK_GRASS]:'草方块',[ITEM.BLOCK_DIRT]:'泥土',[ITEM.BLOCK_STONE]:'石头',
   [ITEM.BLOCK_LOG]:'原木',[ITEM.BLOCK_LEAVES]:'树叶',[ITEM.BLOCK_PLANKS]:'木板',
@@ -325,25 +324,17 @@ function createFallbackTile(type){
   ctx.fillRect(cell,cell,cell,cell);
   return c;
 }
+/* ★ 物品图标：加载成功用图片；未加载统一紫黑棋盘格（不再手搓） */
 function createItemIcon(itemType){
   const c=document.createElement('canvas');c.width=32;c.height=32;
   const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=false;
-  if(itemType===ITEM.APPLE){
-    ctx.fillStyle='#c03030';ctx.beginPath();ctx.arc(16,18,11,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle='#a02020';ctx.beginPath();ctx.arc(12,20,5,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle='#6a4020';ctx.fillRect(15,3,2,7);
-    ctx.fillStyle='#3a7a2a';ctx.beginPath();ctx.ellipse(21,6,5,2.5,-0.5,0,Math.PI*2);ctx.fill();
-    return c;
-  }
   const oreBlock=ITEM_ICON_BLOCK[itemType];
   if(oreBlock&&tileCanvasCache[oreBlock]){ctx.drawImage(tileCanvasCache[oreBlock],0,0,32,32);return c;}
   const blockType=ITEM_TO_BLOCK[itemType];
   if(blockType&&tileCanvasCache[blockType]){ctx.drawImage(tileCanvasCache[blockType],0,0,32,32);return c;}
-  const fb=document.createElement('canvas');fb.width=32;fb.height=32;
-  const fx=fb.getContext('2d');
-  fx.fillStyle='#000';fx.fillRect(0,0,32,32);
-  fx.fillStyle='#FF00FF';fx.fillRect(0,0,16,16);fx.fillRect(16,16,16,16);
-  return fb;
+  ctx.fillStyle='#000';ctx.fillRect(0,0,32,32);
+  ctx.fillStyle='#FF00FF';ctx.fillRect(0,0,16,16);ctx.fillRect(16,16,16,16);
+  return c;
 }
 function buildItemIcons(){
   const items=[ITEM.BLOCK_GRASS,ITEM.BLOCK_DIRT,ITEM.BLOCK_STONE,ITEM.BLOCK_LOG,ITEM.BLOCK_LEAVES,ITEM.BLOCK_PLANKS,ITEM.BLOCK_COBBLE,ITEM.BLOCK_GLASS,ITEM.BLOCK_CRAFTING,ITEM.BLOCK_FURNACE,ITEM.BLOCK_SAND,ITEM.BLOCK_GRAVEL,ITEM.COAL,ITEM.CHARCOAL,ITEM.STONE_ITEM,ITEM.RAW_IRON,ITEM.RAW_GOLD,ITEM.DIAMOND,ITEM.STICK,ITEM.TORCH,ITEM.DOOR,ITEM.LADDER,ITEM.SAPLING,ITEM.APPLE,ITEM.BED,ITEM.WOOL,ITEM.RAW_MUTTON,ITEM.COOKED_MUTTON,ITEM.RAW_CHICKEN,ITEM.COOKED_CHICKEN];
@@ -1428,11 +1419,15 @@ function isInLadder(px,py,pw,ph){
   for(let y=t;y<=b;y++)for(let x=l;x<=r;x++)if(getBlock(x,y)===BLOCK.LADDER)return true;
   return false;
 }
+/* ★ 蹲下防滑落：检查移动后玩家脚部边缘是否仍有支撑 */
 function isSupportedAhead(dx){
   if(dx===0)return true;
-  const footY=player.y+player.h+2;
-  const checkX=dx>0?player.x+player.w+4:player.x-4;
-  const col=Math.floor(checkX/TILE),row=Math.floor(footY/TILE);
+  const footY=player.y+player.h+1;
+  const newX=player.x+dx;
+  /* 前进方向的边缘（-0.01 保证"最后一像素"允许） */
+  const edgeX=dx>0?(newX+player.w-0.01):newX;
+  const col=Math.floor(edgeX/TILE);
+  const row=Math.floor(footY/TILE);
   if(row<0||row>=CHUNK_H)return false;
   const b=getBlock(col,row);
   return b!==BLOCK.AIR&&b!==BLOCK.GLASS&&b!==BLOCK.TORCH&&b!==BLOCK.LADDER&&b!==BLOCK.SAPLING&&b!==BLOCK.BED;
@@ -1467,11 +1462,12 @@ function updatePhysics(){
     let blocks=getBlocksInRect(player.x,player.y,player.w,player.h);
     for(const b of blocks){if(dx>0)player.x=b.col*TILE-player.w;else if(dx<0)player.x=b.col*TILE+TILE;}
     if(onLadder){
+      /* ★ 梯子上也有重力，但速度减半 */
       const upKey=touchActive['jump']||touchActive['up']||keys['w']||keys[' ']||keys['arrowup'];
       const downKey=touchActive['sneak']||touchActive['down']||keys['s']||keys['shift']||keys['arrowdown'];
       if(upKey)player.vy=-3;
       else if(downKey)player.vy=3;
-      else player.vy=0;
+      else player.vy=Math.min(player.vy+GRAVITY*0.5,3);
       player.onGround=false;
     }else{
       if(!player.onGround&&!player.isFalling){player.isFalling=true;player.fallStartY=player.y;}
@@ -1695,8 +1691,6 @@ function drawDragging(){
   if(img)ctx.drawImage(img,dragging.x-s/2,dragging.y-s/2,s,s);
   ctx.restore();
 }
-
-/* ★ 物品名提示：鼠标悬停在物品栏格子上时显示名字 */
 function drawItemTooltip(){
   if(gameState!=='playing')return;
   if(showInGameMenu||showInventory||showCraftingTable||showFurnace)return;
@@ -1724,7 +1718,6 @@ function drawItemTooltip(){
   ctx.fillText(name,tx+tw/2,ty+th/2);
   ctx.restore();
 }
-
 function drawRecipeList(L,recipes,title,hint){
   ctx.fillStyle='rgba(30,30,50,0.96)';ctx.fillRect(L.x,L.y,L.w,Math.min(L.h,canvas.height*4));
   ctx.strokeStyle='#8a8aaa';ctx.lineWidth=3;ctx.strokeRect(L.x,L.y,L.w,Math.min(L.h,canvas.height*4));
