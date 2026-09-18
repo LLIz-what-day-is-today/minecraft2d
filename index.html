@@ -1037,7 +1037,11 @@ function interactFunctionalBlock(worldCol,worldRow){
   if(block===BLOCK.CRAFTING){showCraftingTable=true;showInventory=false;showFurnace=false;closeChest();}
   else if(block===BLOCK.FURNACE||block===BLOCK.LIT_FURNACE){showFurnace=true;showInventory=false;showCraftingTable=false;closeChest();}
   else if(block===BLOCK.CHEST){openChestAt(worldCol,worldRow);}
-  else if(block===BLOCK.BED){gameTime=0;dayLight=1;isNight=false;player.spawnX=player.x;player.spawnY=player.y;player.health=player.maxHealth;}
+  else if(block===BLOCK.BED){
+    /* ★ 睡觉不再回血，只重置时间与重生点 */
+    gameTime=0;dayLight=1;isNight=false;
+    player.spawnX=player.x;player.spawnY=player.y;
+  }
   else if(block===BLOCK.DOOR_LOWER||block===BLOCK.DOOR_UPPER){
     const key2=getDoorLowerKey(worldCol,worldRow);
     if(key2){const cur=doorStates.get(key2)===true;doorStates.set(key2,!cur);}
@@ -1545,8 +1549,10 @@ canvas.addEventListener('mousedown',e=>{
       return;
     }
     if(block===BLOCK.BED){
+      /* ★ 睡觉不再回血，只重置时间与重生点 */
       gameTime=0;dayLight=1;isNight=false;
-      player.spawnX=player.x;player.spawnY=player.y;player.health=player.maxHealth;return;
+      player.spawnX=player.x;player.spawnY=player.y;
+      return;
     }
     if(block===BLOCK.AIR&&!overlap){
       const item=inventory[selectedSlot];
