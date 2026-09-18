@@ -60,6 +60,13 @@ const touchActive={};
 let touchButtons={},phoneActiveButton=null;
 const doorStates=new Map();
 const activeTouchMap={};
+
+/* ===== 箱子数据 ===== */
+const chestData=new Map();          // "x,y" -> Array(27)
+let showChest=false,openChestX=0,openChestY=0;
+const CHEST_COLS=9,CHEST_ROWS=3,CHEST_SIZE=27,CHEST_TITLE_H=22;
+let pendingTouchDrag=null;          // 手机端待定拖拽
+
 /* ★ 触摸/鼠标光圈：跟随手指/鼠标移动 */
 const touchRipples=new Map();
 
@@ -146,8 +153,8 @@ function playBreakSound(){
 
 let lastTouchTime=0;
 
-const BLOCK={AIR:0,GRASS:1,DIRT:2,STONE:3,LOG:4,LEAVES:5,PLANKS:6,COBBLE:7,GLASS:8,CRAFTING:9,FURNACE:10,LIT_FURNACE:11,SAND:12,GRAVEL:13,COAL_ORE:14,IRON_ORE:15,GOLD_ORE:16,DIAMOND_ORE:17,BEDROCK:18,TORCH:19,DOOR_LOWER:20,DOOR_UPPER:21,LADDER:22,SAPLING:23,BED:24,WOOL:25};
-const ITEM={BLOCK_GRASS:100,BLOCK_DIRT:101,BLOCK_STONE:102,BLOCK_LOG:103,BLOCK_LEAVES:104,BLOCK_PLANKS:105,BLOCK_COBBLE:106,BLOCK_GLASS:107,BLOCK_CRAFTING:108,BLOCK_FURNACE:109,BLOCK_SAND:110,BLOCK_GRAVEL:111,COAL:200,CHARCOAL:201,STONE_ITEM:202,RAW_IRON:300,RAW_GOLD:301,DIAMOND:302,STICK:400,TORCH:401,DOOR:402,LADDER:403,SAPLING:404,APPLE:405,BED:406,WOOL:407,RAW_MUTTON:500,COOKED_MUTTON:501,RAW_CHICKEN:502,COOKED_CHICKEN:503};
+const BLOCK={AIR:0,GRASS:1,DIRT:2,STONE:3,LOG:4,LEAVES:5,PLANKS:6,COBBLE:7,GLASS:8,CRAFTING:9,FURNACE:10,LIT_FURNACE:11,SAND:12,GRAVEL:13,COAL_ORE:14,IRON_ORE:15,GOLD_ORE:16,DIAMOND_ORE:17,BEDROCK:18,TORCH:19,DOOR_LOWER:20,DOOR_UPPER:21,LADDER:22,SAPLING:23,BED:24,WOOL:25,CHEST:26};
+const ITEM={BLOCK_GRASS:100,BLOCK_DIRT:101,BLOCK_STONE:102,BLOCK_LOG:103,BLOCK_LEAVES:104,BLOCK_PLANKS:105,BLOCK_COBBLE:106,BLOCK_GLASS:107,BLOCK_CRAFTING:108,BLOCK_FURNACE:109,BLOCK_SAND:110,BLOCK_GRAVEL:111,COAL:200,CHARCOAL:201,STONE_ITEM:202,RAW_IRON:300,RAW_GOLD:301,DIAMOND:302,STICK:400,TORCH:401,DOOR:402,LADDER:403,SAPLING:404,APPLE:405,BED:406,WOOL:407,RAW_MUTTON:500,COOKED_MUTTON:501,RAW_CHICKEN:502,COOKED_CHICKEN:503,BLOCK_CHEST:504};
 
 const ITEM_NAMES={
   [ITEM.BLOCK_GRASS]:'草方块',[ITEM.BLOCK_DIRT]:'泥土',[ITEM.BLOCK_STONE]:'石头',
@@ -159,7 +166,8 @@ const ITEM_NAMES={
   [ITEM.STICK]:'木棍',[ITEM.TORCH]:'火把',[ITEM.DOOR]:'橡木门',
   [ITEM.LADDER]:'梯子',[ITEM.SAPLING]:'橡树苗',[ITEM.APPLE]:'苹果',
   [ITEM.BED]:'床',[ITEM.WOOL]:'白色羊毛',[ITEM.RAW_MUTTON]:'生羊肉',
-  [ITEM.COOKED_MUTTON]:'熟羊肉',[ITEM.RAW_CHICKEN]:'生鸡肉',[ITEM.COOKED_CHICKEN]:'熟鸡肉'};
+  [ITEM.COOKED_MUTTON]:'熟羊肉',[ITEM.RAW_CHICKEN]:'生鸡肉',[ITEM.COOKED_CHICKEN]:'熟鸡肉',
+  [ITEM.BLOCK_CHEST]:'箱子'};
 
 const BLOCK_TO_ITEM={
   [BLOCK.GRASS]:ITEM.BLOCK_GRASS,[BLOCK.DIRT]:ITEM.BLOCK_DIRT,[BLOCK.STONE]:ITEM.BLOCK_COBBLE,
@@ -169,7 +177,7 @@ const BLOCK_TO_ITEM={
   [BLOCK.GRAVEL]:ITEM.BLOCK_GRAVEL,[BLOCK.COAL_ORE]:ITEM.COAL,[BLOCK.IRON_ORE]:ITEM.RAW_IRON,
   [BLOCK.GOLD_ORE]:ITEM.RAW_GOLD,[BLOCK.DIAMOND_ORE]:ITEM.DIAMOND,[BLOCK.TORCH]:ITEM.TORCH,
   [BLOCK.DOOR_LOWER]:ITEM.DOOR,[BLOCK.LADDER]:ITEM.LADDER,[BLOCK.SAPLING]:ITEM.SAPLING,
-  [BLOCK.BED]:ITEM.BED,[BLOCK.WOOL]:ITEM.WOOL};
+  [BLOCK.BED]:ITEM.BED,[BLOCK.WOOL]:ITEM.WOOL,[BLOCK.CHEST]:ITEM.BLOCK_CHEST};
 const ITEM_TO_BLOCK={
   [ITEM.BLOCK_GRASS]:BLOCK.GRASS,[ITEM.BLOCK_DIRT]:BLOCK.DIRT,[ITEM.BLOCK_STONE]:BLOCK.STONE,
   [ITEM.BLOCK_LOG]:BLOCK.LOG,[ITEM.BLOCK_LEAVES]:BLOCK.LEAVES,[ITEM.BLOCK_PLANKS]:BLOCK.PLANKS,
@@ -177,6 +185,7 @@ const ITEM_TO_BLOCK={
   [ITEM.BLOCK_FURNACE]:BLOCK.FURNACE,[ITEM.BLOCK_SAND]:BLOCK.SAND,[ITEM.BLOCK_GRAVEL]:BLOCK.GRAVEL,
   [ITEM.TORCH]:BLOCK.TORCH,[ITEM.DOOR]:BLOCK.DOOR_LOWER,[ITEM.LADDER]:BLOCK.LADDER,
   [ITEM.SAPLING]:BLOCK.SAPLING,[ITEM.BED]:BLOCK.BED,[ITEM.WOOL]:BLOCK.WOOL,
+  [ITEM.BLOCK_CHEST]:BLOCK.CHEST,
   [ITEM.COAL]:BLOCK.COAL_ORE,[ITEM.RAW_IRON]:BLOCK.IRON_ORE,[ITEM.RAW_GOLD]:BLOCK.GOLD_ORE,[ITEM.DIAMOND]:BLOCK.DIAMOND_ORE};
 const ITEM_ICON_BLOCK={
   [ITEM.RAW_IRON]:BLOCK.IRON_ORE,[ITEM.RAW_GOLD]:BLOCK.GOLD_ORE,[ITEM.DIAMOND]:BLOCK.DIAMOND_ORE,
@@ -206,6 +215,7 @@ const TEXTURE_URLS={
   [BLOCK.LADDER]:'https://zh.minecraft.wiki/images/BlockSprite_ladder.png',
   [BLOCK.SAPLING]:'https://zh.minecraft.wiki/images/BlockSprite_oak-sapling.png',
   [BLOCK.WOOL]:'https://zh.minecraft.wiki/images/BlockSprite_white-wool.png',
+  [BLOCK.CHEST]:'https://zh.minecraft.wiki/images/BlockSprite_chest.png?05052',
   [BLOCK.DOOR_LOWER]:'https://zh.minecraft.wiki/images/Oak_Door_%28bottom_texture%29_JE2_BE1.png?730a6',
   [BLOCK.DOOR_UPPER]:'https://zh.minecraft.wiki/images/BlockSprite_oak-trapdoor.png?ed47d',
   [BLOCK.BED]:'https://zh.minecraft.wiki/images/BlockSprite_red-bed.png'};
@@ -232,7 +242,7 @@ let sheepImage=null,chickenImage=null,btnNormal=null,btnHover=null,btnDisabled=n
 let isLoading=true,loadingAlpha=1,loadingStartTime=0,loadTexturesFinished=false;
 const LOADING_FADE_SPEED=0.02,MIN_LOADING_TIME=600;
 const FULLSCREEN_BTN={x:15,y:0,w:80,h:30};
-const uiProgress={inventory:0,crafting:0,furnace:0};
+const uiProgress={inventory:0,crafting:0,furnace:0,chest:0};
 const UI_ANIM_SPEED=0.16,SLOT_SIZE=40,SLOT_GAP=2;
 let selectorX=0,selectorY=0,selectorInitialized=false;
 const SELECTOR_LERP=0.28;
@@ -241,7 +251,7 @@ const BOX_LERP=0.3;
 const fallingBlocks=[],animals=[],saplings=new Map();
 const lightMap=new Map();
 const LIGHT_EMISSION={[BLOCK.TORCH]:14,[BLOCK.LIT_FURNACE]:13};
-const OPAQUE_BLOCKS=new Set([BLOCK.GRASS,BLOCK.DIRT,BLOCK.STONE,BLOCK.LOG,BLOCK.LEAVES,BLOCK.PLANKS,BLOCK.COBBLE,BLOCK.CRAFTING,BLOCK.FURNACE,BLOCK.LIT_FURNACE,BLOCK.SAND,BLOCK.GRAVEL,BLOCK.COAL_ORE,BLOCK.IRON_ORE,BLOCK.GOLD_ORE,BLOCK.DIAMOND_ORE,BLOCK.BEDROCK,BLOCK.DOOR_LOWER,BLOCK.DOOR_UPPER,BLOCK.WOOL]);
+const OPAQUE_BLOCKS=new Set([BLOCK.GRASS,BLOCK.DIRT,BLOCK.STONE,BLOCK.LOG,BLOCK.LEAVES,BLOCK.PLANKS,BLOCK.COBBLE,BLOCK.CRAFTING,BLOCK.FURNACE,BLOCK.LIT_FURNACE,BLOCK.SAND,BLOCK.GRAVEL,BLOCK.COAL_ORE,BLOCK.IRON_ORE,BLOCK.GOLD_ORE,BLOCK.DIAMOND_ORE,BLOCK.BEDROCK,BLOCK.DOOR_LOWER,BLOCK.DOOR_UPPER,BLOCK.WOOL,BLOCK.CHEST]);
 const MENU_BUTTONS={
   singleplayer:{x:0,y:0,w:400,h:44,label:'单人游戏',enabled:true},
   multiplayer:{x:0,y:0,w:400,h:44,label:'多人游戏',enabled:false},
@@ -337,7 +347,7 @@ function createItemIcon(itemType){
   return c;
 }
 function buildItemIcons(){
-  const items=[ITEM.BLOCK_GRASS,ITEM.BLOCK_DIRT,ITEM.BLOCK_STONE,ITEM.BLOCK_LOG,ITEM.BLOCK_LEAVES,ITEM.BLOCK_PLANKS,ITEM.BLOCK_COBBLE,ITEM.BLOCK_GLASS,ITEM.BLOCK_CRAFTING,ITEM.BLOCK_FURNACE,ITEM.BLOCK_SAND,ITEM.BLOCK_GRAVEL,ITEM.COAL,ITEM.CHARCOAL,ITEM.STONE_ITEM,ITEM.RAW_IRON,ITEM.RAW_GOLD,ITEM.DIAMOND,ITEM.STICK,ITEM.TORCH,ITEM.DOOR,ITEM.LADDER,ITEM.SAPLING,ITEM.APPLE,ITEM.BED,ITEM.WOOL,ITEM.RAW_MUTTON,ITEM.COOKED_MUTTON,ITEM.RAW_CHICKEN,ITEM.COOKED_CHICKEN];
+  const items=[ITEM.BLOCK_GRASS,ITEM.BLOCK_DIRT,ITEM.BLOCK_STONE,ITEM.BLOCK_LOG,ITEM.BLOCK_LEAVES,ITEM.BLOCK_PLANKS,ITEM.BLOCK_COBBLE,ITEM.BLOCK_GLASS,ITEM.BLOCK_CRAFTING,ITEM.BLOCK_FURNACE,ITEM.BLOCK_SAND,ITEM.BLOCK_GRAVEL,ITEM.COAL,ITEM.CHARCOAL,ITEM.STONE_ITEM,ITEM.RAW_IRON,ITEM.RAW_GOLD,ITEM.DIAMOND,ITEM.STICK,ITEM.TORCH,ITEM.DOOR,ITEM.LADDER,ITEM.SAPLING,ITEM.APPLE,ITEM.BED,ITEM.WOOL,ITEM.BLOCK_CHEST,ITEM.RAW_MUTTON,ITEM.COOKED_MUTTON,ITEM.RAW_CHICKEN,ITEM.COOKED_CHICKEN];
   items.forEach(item=>{if(!itemIconCache[item])itemIconCache[item]=createItemIcon(item);});
 }
 function loadTextures(callback){
@@ -534,6 +544,7 @@ const RECIPES={
     {inputs:[{type:ITEM.BLOCK_LOG,count:1}],output:{type:ITEM.BLOCK_PLANKS,count:4},name:'1 原木 → 4 木板'},
     {inputs:[{type:ITEM.BLOCK_PLANKS,count:4}],output:{type:ITEM.BLOCK_CRAFTING,count:1},name:'4 木板 → 1 工作台'},
     {inputs:[{type:ITEM.BLOCK_PLANKS,count:2}],output:{type:ITEM.STICK,count:4},name:'2 木板 → 4 木棍'},
+    {inputs:[{type:ITEM.BLOCK_PLANKS,count:8}],output:{type:ITEM.BLOCK_CHEST,count:1},name:'8 木板 → 1 箱子'},
     {inputs:[{type:ITEM.BLOCK_COBBLE,count:8}],output:{type:ITEM.BLOCK_FURNACE,count:1},name:'8 原石 → 1 熔炉'},
     {inputs:[{type:ITEM.BLOCK_PLANKS,count:6}],output:{type:ITEM.DOOR,count:3},name:'6 木板 → 3 门'},
     {inputs:[{type:ITEM.STICK,count:7}],output:{type:ITEM.LADDER,count:3},name:'7 木棍 → 3 梯子'},
@@ -589,6 +600,111 @@ function getSlotAtPoint(mx,my){
   }
   return -1;
 }
+
+/* ===== 箱子：布局 / 索引 / 拖拽核心 ===== */
+function getChestArray(x,y){
+  const k=x+','+y;
+  let a=chestData.get(k);
+  if(!a){a=new Array(CHEST_SIZE).fill(null);chestData.set(k,a);}
+  return a;
+}
+function getChestBarRect(){
+  const w=CHEST_COLS*SLOT_SIZE+(CHEST_COLS+1)*SLOT_GAP;
+  const h=CHEST_ROWS*SLOT_SIZE+(CHEST_ROWS+1)*SLOT_GAP+CHEST_TITLE_H;
+  const inv=getInventoryBarRect();
+  let y=inv.y-h-16;
+  if(y<0)y=0;
+  return{x:(canvas.width-w)/2,y,w,h};
+}
+function getChestSlotIndex(mx,my){
+  const bar=getChestBarRect();
+  for(let i=0;i<CHEST_SIZE;i++){
+    const col=i%CHEST_COLS,row=Math.floor(i/CHEST_COLS);
+    const sx=bar.x+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP);
+    const sy=bar.y+CHEST_TITLE_H+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP);
+    if(mx>=sx&&mx<=sx+SLOT_SIZE&&my>=sy&&my<=sy+SLOT_SIZE)return i;
+  }
+  return -1;
+}
+function isInventoryBarVisible(){return !inventoryBarHidden||showChest;}
+function getSlotRefAtPoint(mx,my){
+  if(showChest){
+    const ci=getChestSlotIndex(mx,my);
+    if(ci>=0)return{kind:'chest',index:ci};
+  }
+  if(isInventoryBarVisible()){
+    const ii=getSlotAtPoint(mx,my);
+    if(ii>=0)return{kind:'inv',index:ii};
+  }
+  return null;
+}
+function getSlotArrayAndIndex(ref){
+  if(!ref)return null;
+  if(ref.kind==='inv')return{arr:inventory,idx:ref.index};
+  if(ref.kind==='chest'&&showChest)return{arr:getChestArray(openChestX,openChestY),idx:ref.index};
+  return null;
+}
+function openChestAt(x,y){
+  openChestX=x;openChestY=y;
+  getChestArray(x,y);
+  showChest=true;showInventory=false;showCraftingTable=false;showFurnace=false;
+}
+function closeChest(){
+  if(!showChest)return;
+  cancelDrag();
+  showChest=false;
+}
+function startDragFromRef(ref,mx,my,touchId){
+  if(!ref)return false;
+  const ai=getSlotArrayAndIndex(ref);
+  if(!ai)return false;
+  const it=ai.arr[ai.idx];
+  if(!it)return false;
+  dragging={ref:ref,x:mx,y:my,item:it,touchId:touchId};
+  ai.arr[ai.idx]=null;
+  if(ref.kind==='inv')selectedSlot=ref.index;
+  return true;
+}
+function cancelDrag(){
+  if(!dragging)return;
+  const src=getSlotArrayAndIndex(dragging.ref);
+  if(src&&!src.arr[src.idx])src.arr[src.idx]=dragging.item;
+  else addItemToInventory(dragging.item.type,dragging.item.count);
+  dragging=null;
+}
+function finishDrag(mx,my){
+  if(!dragging)return;
+  const item=dragging.item;
+  const srcRef=dragging.ref;
+  const ref=getSlotRefAtPoint(mx,my);
+  if(ref){
+    const ai=getSlotArrayAndIndex(ref);
+    if(ai){
+      const ti=ai.arr[ai.idx];
+      ai.arr[ai.idx]=item;
+      const src=getSlotArrayAndIndex(srcRef);
+      if(src&&ti)src.arr[src.idx]=ti;
+      else if(ti)addItemToInventory(ti.type,ti.count);
+      dragging=null;
+      return;
+    }
+  }
+  const src=getSlotArrayAndIndex(srcRef);
+  if(src&&!src.arr[src.idx])src.arr[src.idx]=item;
+  else addItemToInventory(item.type,item.count);
+  dragging=null;
+}
+function dropChestContents(x,y){
+  const k=x+','+y;
+  const arr=chestData.get(k);
+  if(!arr)return;
+  for(let i=0;i<CHEST_SIZE;i++){
+    const it=arr[i];
+    if(it)spawnDrop(x,y,it.type,it.count);
+  }
+  chestData.delete(k);
+}
+
 function dropSelectedItem(){
   const item=inventory[selectedSlot];
   if(!item||item.count<=0)return;
@@ -601,6 +717,7 @@ function resetWorld(seed){
   worldSeed=seed;
   chunks.clear();blockChanges.clear();drops.length=0;fallingBlocks.length=0;
   animals.length=0;saplings.clear();lightMap.clear();doorStates.clear();
+  chestData.clear();
   inventory=new Array(INVENTORY_SIZE).fill(null);
   selectedSlot=0;
   player.health=player.maxHealth;player.vx=0;player.vy=0;
@@ -610,8 +727,9 @@ function resetWorld(seed){
   player.spawnX=player.x;player.spawnY=player.y;
   camera.x=0;camera.y=0;
   selectorInitialized=false;boxInitialized=false;
-  showInventory=false;showCraftingTable=false;showFurnace=false;
-  uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;
+  showInventory=false;showCraftingTable=false;showFurnace=false;showChest=false;
+  dragging=null;pendingTouchDrag=null;
+  uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;uiProgress.chest=0;
   gameTime=0;dayLight=1;isNight=false;
   animalSpawnTimer=0;
   for(let i=0;i<4;i++){
@@ -626,7 +744,19 @@ function loadSaveCode(code){
   worldSeed=d.seed||0;
   if(d.name){playerName=d.name;localStorage.setItem('mc2d_name',playerName);}
   chunks.clear();blockChanges.clear();lightMap.clear();doorStates.clear();
+  chestData.clear();
   if(Array.isArray(d.changes))for(const c of d.changes)if(Array.isArray(c)&&c.length===3)blockChanges.set(c[0]+','+c[1],c[2]);
+  /* 箱子数据（旧存档没有 chests 字段，自动兼容） */
+  if(Array.isArray(d.chests))for(const c of d.chests){
+    if(Array.isArray(c)&&c.length>=3&&Array.isArray(c[2])){
+      const arr=new Array(CHEST_SIZE).fill(null);
+      for(let i=0;i<CHEST_SIZE&&i<c[2].length;i++){
+        const it=c[2][i];
+        if(it&&typeof it.type==='number'&&typeof it.count==='number'&&it.count>0)arr[i]={type:it.type,count:it.count};
+      }
+      chestData.set(c[0]+','+c[1],arr);
+    }
+  }
   drops.length=0;fallingBlocks.length=0;animals.length=0;saplings.clear();
   inventory=new Array(INVENTORY_SIZE).fill(null);
   if(Array.isArray(d.inventory))for(let i=0;i<INVENTORY_SIZE&&i<d.inventory.length;i++){
@@ -640,8 +770,9 @@ function loadSaveCode(code){
   player.vx=0;player.vy=0;player.isFalling=false;player.facing=1;
   player.spawnX=player.x;player.spawnY=player.y;
   selectorInitialized=false;boxInitialized=false;
-  showInventory=false;showCraftingTable=false;showFurnace=false;
-  uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;
+  showInventory=false;showCraftingTable=false;showFurnace=false;showChest=false;
+  dragging=null;pendingTouchDrag=null;
+  uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;uiProgress.chest=0;
   gameState='playing';menuSlide=0;gameTime=0;dayLight=1;isNight=false;
   animalSpawnTimer=0;
   for(const key of blockChanges.keys()){
@@ -657,7 +788,16 @@ function buildSaveCode(){
     const[x,y]=k.split(',').map(Number);
     if(chunks.has(Math.floor(x/CHUNK_W)))chg.push([x,y,v]);
   }
-  return encodeSave({version:2,seed:worldSeed,name:playerName,x:Math.round(player.x),y:Math.round(player.y),health:player.health,selectedSlot,inventory:inv,changes:chg});
+  const cst=[];
+  for(const[k,arr]of chestData){
+    if(!arr)continue;
+    let has=false;
+    for(let i=0;i<CHEST_SIZE;i++){if(arr[i]){has=true;break;}}
+    if(!has)continue;
+    const[x,y]=k.split(',').map(Number);
+    cst.push([x,y,arr.map(it=>it?{type:it.type,count:it.count}:null)]);
+  }
+  return encodeSave({version:3,seed:worldSeed,name:playerName,x:Math.round(player.x),y:Math.round(player.y),health:player.health,selectedSlot,inventory:inv,changes:chg,chests:cst});
 }
 function createWorldFromSeed(){
   const t=seedInputText.trim();
@@ -717,13 +857,17 @@ document.addEventListener('keydown',e=>{
   if(gameState==='playing'){
     if(document.getElementById('saveOverlay').style.display==='flex')return;
     if(e.key==='Escape'){
-      if(showInventory||showCraftingTable||showFurnace){showInventory=false;showCraftingTable=false;showFurnace=false;return;}
+      if(showInventory||showCraftingTable||showFurnace||showChest){closeChest();showInventory=false;showCraftingTable=false;showFurnace=false;return;}
       if(showInGameMenu){if(showOptionsMenu){showOptionsMenu=false;return;}showInGameMenu=false;return;}
       showInGameMenu=true;showOptionsMenu=false;return;
     }
     if(showInGameMenu)return;
-    if(key==='q'&&!e.repeat){if(showInventory||showCraftingTable||showFurnace)return;dropSelectedItem();return;}
-    if(key==='e'&&!e.repeat){if(showInventory||showCraftingTable||showFurnace){showInventory=false;showCraftingTable=false;showFurnace=false;}else showInventory=true;}
+    if(key==='q'&&!e.repeat){if(showInventory||showCraftingTable||showFurnace||showChest)return;dropSelectedItem();return;}
+    if(key==='e'&&!e.repeat){
+      if(showInventory||showCraftingTable||showFurnace||showChest){
+        closeChest();showInventory=false;showCraftingTable=false;showFurnace=false;
+      }else showInventory=true;
+    }
     if(key==='h'&&!e.repeat){inventoryBarHidden=!inventoryBarHidden;return;}
     if(e.key>='1'&&e.key<='9'&&!e.repeat){const n=parseInt(e.key)-1;const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=r*INV_COLS+n;}
     if(key==='z'&&!e.repeat){const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=((r-1+INV_ROWS)%INV_ROWS)*INV_COLS;}
@@ -758,13 +902,17 @@ resize();
 function screenToWorld(mx,my){return {x: camera.x + mx, y: camera.y + my};}
 
 function isFunctionalBlock(b){
-  return b===BLOCK.CRAFTING||b===BLOCK.FURNACE||b===BLOCK.LIT_FURNACE||b===BLOCK.BED||b===BLOCK.DOOR_LOWER||b===BLOCK.DOOR_UPPER;
+  return b===BLOCK.CRAFTING||b===BLOCK.FURNACE||b===BLOCK.LIT_FURNACE||b===BLOCK.BED||b===BLOCK.DOOR_LOWER||b===BLOCK.DOOR_UPPER||b===BLOCK.CHEST;
 }
 function breakBlockAt(worldCol,worldRow){
   const block=getBlock(worldCol,worldRow);
   if(block===BLOCK.AIR||block===BLOCK.BEDROCK||block===BLOCK.DOOR_UPPER)return;
   const overlap=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
   if(overlap)return;
+  if(block===BLOCK.CHEST){
+    if(showChest&&openChestX===worldCol&&openChestY===worldRow)closeChest();
+    dropChestContents(worldCol,worldRow);
+  }
   setBlock(worldCol,worldRow,BLOCK.AIR);
   playBreakSound();
   if(block===BLOCK.LEAVES){
@@ -781,8 +929,9 @@ function breakBlockAt(worldCol,worldRow){
 }
 function interactFunctionalBlock(worldCol,worldRow){
   const block=getBlock(worldCol,worldRow);
-  if(block===BLOCK.CRAFTING){showCraftingTable=true;showInventory=false;showFurnace=false;}
-  else if(block===BLOCK.FURNACE||block===BLOCK.LIT_FURNACE){showFurnace=true;showInventory=false;showCraftingTable=false;}
+  if(block===BLOCK.CRAFTING){showCraftingTable=true;showInventory=false;showFurnace=false;closeChest();}
+  else if(block===BLOCK.FURNACE||block===BLOCK.LIT_FURNACE){showFurnace=true;showInventory=false;showCraftingTable=false;closeChest();}
+  else if(block===BLOCK.CHEST){openChestAt(worldCol,worldRow);}
   else if(block===BLOCK.BED){gameTime=0;dayLight=1;isNight=false;player.spawnX=player.x;player.spawnY=player.y;player.health=player.maxHealth;}
   else if(block===BLOCK.DOOR_LOWER||block===BLOCK.DOOR_UPPER){
     const key2=getDoorLowerKey(worldCol,worldRow);
@@ -882,7 +1031,15 @@ function handleTouchGame(mx,my){
     showInventory=false;showCraftingTable=false;showFurnace=false;
     return;
   }
-  if(!inventoryBarHidden){
+  if(showChest){
+    const cb=getChestBarRect();
+    if(pointInRect(mx,my,cb.x,cb.y,cb.w,cb.h))return;
+    const bar=getInventoryBarRect();
+    if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h))return;
+    closeChest();
+    return;
+  }
+  if(isInventoryBarVisible()){
     const bar=getInventoryBarRect();
     if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
       const slot=getSlotAtPoint(mx,my);
@@ -933,7 +1090,7 @@ function handlePhoneButtonPress(btnName,touchId){
   if(btnName==='menu'){showInGameMenu=true;return;}
   if(btnName==='inventory'){
     if(showInventory){showInventory=false;}
-    else{showInventory=true;showCraftingTable=false;showFurnace=false;}
+    else{showInventory=true;showCraftingTable=false;showFurnace=false;closeChest();}
     return;
   }
   if(btnName==='hideInv'){inventoryBarHidden=!inventoryBarHidden;return;}
@@ -965,6 +1122,12 @@ canvas.addEventListener('touchstart',e=>{
         if(btnName==='menu'||btnName==='inventory'||btnName==='hideInv'||btnName==='sneak'||btnName==='down'){touchActive[btnName]=false;}
         continue;
       }
+      /* ★ 手机端：先判断是否点在物品格（箱子或物品栏）上 */
+      const ref=getSlotRefAtPoint(mx,my);
+      if(ref){
+        pendingTouchDrag={touchId:t.identifier,ref,startX:mx,startY:my};
+        continue;
+      }
       handleTouchGame(mx,my);
     }else if(gameState==='menu'||gameState==='saves'||gameState==='createWorld'){
       const ease=easeOutCubic(menuSlide);
@@ -975,7 +1138,7 @@ canvas.addEventListener('touchstart',e=>{
     }else{handleTouchGame(mx,my);}
   }
 },{passive:false});
-/* ★ 触摸移动：更新光圈位置，跟随手指 */
+/* ★ 触摸移动：更新光圈位置 + 启动/更新拖拽 */
 canvas.addEventListener('touchmove',e=>{
   if(!phoneMode)return;
   e.preventDefault();
@@ -984,6 +1147,14 @@ canvas.addEventListener('touchmove',e=>{
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
     const r=touchRipples.get(t.identifier);
     if(r){r.x=mx;r.y=my;}
+    if(pendingTouchDrag&&pendingTouchDrag.touchId===t.identifier&&!dragging){
+      const dx=mx-pendingTouchDrag.startX,dy=my-pendingTouchDrag.startY;
+      if(dx*dx+dy*dy>64){
+        startDragFromRef(pendingTouchDrag.ref,mx,my,t.identifier);
+        pendingTouchDrag=null;
+      }
+    }
+    if(dragging&&dragging.touchId===t.identifier){dragging.x=mx;dragging.y=my;}
   }
 },{passive:false});
 function releaseTouchById(touchId){
@@ -1007,6 +1178,16 @@ canvas.addEventListener('touchend',e=>{
   e.preventDefault();
   lastTouchTime=Date.now();
   for(const t of e.changedTouches){
+    const rect=canvas.getBoundingClientRect();
+    const mx=t.clientX-rect.left,my=t.clientY-rect.top;
+    if(pendingTouchDrag&&pendingTouchDrag.touchId===t.identifier){
+      const ref=pendingTouchDrag.ref;
+      if(ref.kind==='inv')selectedSlot=ref.index;
+      pendingTouchDrag=null;
+    }
+    if(dragging&&dragging.touchId===t.identifier){
+      finishDrag(mx,my);
+    }
     releaseTouchById(t.identifier);
     touchRipples.delete(t.identifier);
   }
@@ -1016,6 +1197,8 @@ canvas.addEventListener('touchcancel',e=>{
   if(!phoneMode)return;
   e.preventDefault();
   for(const t of e.changedTouches){
+    if(pendingTouchDrag&&pendingTouchDrag.touchId===t.identifier)pendingTouchDrag=null;
+    if(dragging&&dragging.touchId===t.identifier)finishDrag(dragging.x,dragging.y);
     releaseTouchById(t.identifier);
     touchRipples.delete(t.identifier);
   }
@@ -1078,7 +1261,7 @@ canvas.addEventListener('mousemove',e=>{
   /* ★ 鼠标光圈跟随鼠标移动 */
   const mr=touchRipples.get('mouse');
   if(mr){mr.x=mx;mr.y=my;}
-  if(gameState==='playing'&&!showInGameMenu&&!showInventory&&!showCraftingTable&&!showFurnace){
+  if(gameState==='playing'&&!showInGameMenu&&!showInventory&&!showCraftingTable&&!showFurnace&&!showChest){
     canvas.style.cursor='crosshair';
   }else{
     let onBtn=false;
@@ -1090,7 +1273,7 @@ canvas.addEventListener('mousemove',e=>{
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 window.addEventListener('wheel',e=>{
   if(gameState!=='playing'||showInGameMenu)return;
-  if(showInventory||showCraftingTable||showFurnace)return;
+  if(showInventory||showCraftingTable||showFurnace||showChest)return;
   if(document.getElementById('saveOverlay').style.display==='flex')return;
   e.preventDefault();
   if(e.deltaY>0)selectedSlot=(selectedSlot+1)%INVENTORY_SIZE;
@@ -1200,44 +1383,24 @@ canvas.addEventListener('mousedown',e=>{
     }
     if(showFurnace)return;
   }
-  if(e.button===0 && !inventoryBarHidden){
-    const bar=getInventoryBarRect();
-    if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
-      const slot=getSlotAtPoint(mx,my);
-      if(slot>=0){const it=inventory[slot];if(it){dragging={fromSlot:slot,x:mx,y:my,item:it};inventory[slot]=null;}}
-      return;
-    }
+  /* ★ 箱子/物品栏拖拽起点 */
+  if(e.button===0){
+    const ref=getSlotRefAtPoint(mx,my);
+    if(ref){startDragFromRef(ref,mx,my,undefined);return;}
   }
   const worldCol=Math.floor(mouseWorldX/TILE);
   const worldRow=Math.floor(mouseWorldY/TILE);
-  const overlap=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
   if(e.button===0){
     for(const a of animals){
       if(mouseWorldX>=a.x&&mouseWorldX<=a.x+a.w&&mouseWorldY>=a.y&&mouseWorldY<=a.y+a.h){a.health-=4;playBreakSound();return;}
     }
-  }
-  if(e.button===0){
-    const block=getBlock(worldCol,worldRow);
-    if(block===BLOCK.BEDROCK)return;
-    if(block===BLOCK.DOOR_UPPER)return;
-    if(block!==BLOCK.AIR&&!overlap){
-      setBlock(worldCol,worldRow,BLOCK.AIR);
-      playBreakSound();
-      if(block===BLOCK.LEAVES){
-        if(Math.random()<0.25)spawnDrop(worldCol,worldRow,ITEM.SAPLING,1);
-        if(Math.random()<0.10)spawnDrop(worldCol,worldRow,ITEM.STICK,1);
-        if(Math.random()<0.05)spawnDrop(worldCol,worldRow,ITEM.APPLE,1);
-      }else if(block===BLOCK.DOOR_LOWER){
-        setBlock(worldCol,worldRow-1,BLOCK.AIR);spawnDrop(worldCol,worldRow,ITEM.DOOR,1);
-      }else{
-        const di=BLOCK_TO_ITEM[block];
-        if(di!==undefined&&di!==null)spawnDrop(worldCol,worldRow,di,1);
-      }
-    }
+    breakBlockAt(worldCol,worldRow);
   }else if(e.button===2){
     const block=getBlock(worldCol,worldRow);
-    if(block===BLOCK.CRAFTING&&!overlap){showCraftingTable=true;showInventory=false;showFurnace=false;return;}
-    if((block===BLOCK.FURNACE||block===BLOCK.LIT_FURNACE)&&!overlap){showFurnace=true;showInventory=false;showCraftingTable=false;return;}
+    const overlap=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
+    if(block===BLOCK.CRAFTING&&!overlap){showCraftingTable=true;showInventory=false;showFurnace=false;closeChest();return;}
+    if((block===BLOCK.FURNACE||block===BLOCK.LIT_FURNACE)&&!overlap){showFurnace=true;showInventory=false;showCraftingTable=false;closeChest();return;}
+    if(block===BLOCK.CHEST&&!overlap){openChestAt(worldCol,worldRow);return;}
     if(block===BLOCK.DOOR_LOWER||block===BLOCK.DOOR_UPPER){
       const key2=getDoorLowerKey(worldCol,worldRow);
       if(key2){const cur=doorStates.get(key2)===true;doorStates.set(key2,!cur);}
@@ -1278,19 +1441,13 @@ canvas.addEventListener('mouseup',e=>{
   touchRipples.delete('mouse');
   if(gameState!=='playing'||isLoading)return;
   if(!dragging)return;
+  if(dragging.touchId!==undefined)return; /* 触屏拖拽交给 touchend */
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
-  if(inventoryBarHidden){inventory[dragging.fromSlot]=dragging.item;dragging=null;return;}
-  const target=getSlotAtPoint(mx,my);
-  if(target>=0&&target!==dragging.fromSlot){
-    const ti=inventory[target];
-    inventory[target]=dragging.item;
-    if(ti)inventory[dragging.fromSlot]=ti;
-  }else inventory[dragging.fromSlot]=dragging.item;
-  dragging=null;
+  finishDrag(mx,my);
 });
-canvas.addEventListener('mouseleave',e=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');});
-window.addEventListener('blur',()=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');for(const k in keys)keys[k]=false;});
+canvas.addEventListener('mouseleave',e=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');cancelDrag();});
+window.addEventListener('blur',()=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');for(const k in keys)keys[k]=false;cancelDrag();});
 document.getElementById('saveConfirmBtn').addEventListener('click',()=>{allowClose=true;location.reload();});
 document.getElementById('saveCancelBtn').addEventListener('click',()=>{document.getElementById('saveOverlay').style.display='none';});
 function spawnDrop(wc,wr,t,c){
@@ -1671,7 +1828,8 @@ function drawHealth(){
   }
 }
 function drawInventoryBar(){
-  const target=inventoryBarHidden?1:0;
+  /* ★ 打开箱子时强制显示物品栏 */
+  const target=(inventoryBarHidden&&!showChest)?1:0;
   inventoryBarAnim+=(target-inventoryBarAnim)*0.2;
   if(inventoryBarAnim>0.99)return;
   const bar=getInventoryBarRect();
@@ -1703,6 +1861,39 @@ function drawInventoryBar(){
   }
   ctx.restore();
 }
+/* ★ 箱子界面 */
+function drawChestUI(){
+  const p=uiProgress.chest;if(p<0.005)return;
+  const e=easeOutCubic(p),o=(1-e)*(canvas.height*0.7);
+  ctx.save();ctx.globalAlpha=e;ctx.translate(0,o);
+  const bar=getChestBarRect();
+  ctx.fillStyle='rgba(30,30,50,0.92)';
+  ctx.fillRect(bar.x,bar.y,bar.w,bar.h);
+  ctx.strokeStyle='#8a8aaa';ctx.lineWidth=3;
+  ctx.strokeRect(bar.x,bar.y,bar.w,bar.h);
+  ctx.fillStyle='#fff';ctx.font='bold 16px '+FONT;
+  ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText('箱子',bar.x+bar.w/2,bar.y+3);
+  const arr=getChestArray(openChestX,openChestY);
+  for(let i=0;i<CHEST_SIZE;i++){
+    const col=i%CHEST_COLS,row=Math.floor(i/CHEST_COLS);
+    const sx=bar.x+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP);
+    const sy=bar.y+CHEST_TITLE_H+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP);
+    ctx.fillStyle='rgba(80,80,110,0.4)';ctx.fillRect(sx,sy,SLOT_SIZE,SLOT_SIZE);
+    ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;ctx.strokeRect(sx,sy,SLOT_SIZE,SLOT_SIZE);
+    const item=arr[i];
+    if(item){
+      const img=itemIconCache[item.type];
+      if(img)ctx.drawImage(img,sx+(SLOT_SIZE-32)/2,sy+(SLOT_SIZE-32)/2,32,32);
+      ctx.fillStyle='#fff';ctx.font='bold 14px '+FONT;
+      ctx.textAlign='right';ctx.textBaseline='bottom';
+      ctx.strokeStyle='#000';ctx.lineWidth=3;
+      ctx.strokeText(item.count,sx+SLOT_SIZE-3,sy+SLOT_SIZE-3);
+      ctx.fillText(item.count,sx+SLOT_SIZE-3,sy+SLOT_SIZE-3);
+    }
+  }
+  ctx.restore();
+}
 function drawDragging(){
   if(!dragging)return;
   const s=42,img=itemIconCache[dragging.item.type];
@@ -1714,7 +1905,7 @@ function drawDragging(){
 function drawItemTooltip(){
   if(gameState!=='playing')return;
   if(showInGameMenu||showInventory||showCraftingTable||showFurnace)return;
-  if(inventoryBarHidden)return;
+  if(inventoryBarHidden&&!showChest)return;
   const slot=getSlotAtPoint(mouseX,mouseY);
   if(slot<0)return;
   const item=inventory[slot];
@@ -1966,6 +2157,7 @@ function drawLog(){
     '疾跑: '+(touchActive['sprint']?'是':'否'),
     '潜行: '+(isSneaking?'是':'否'),
     '背包物品: '+inventory.filter(x=>x).length+'/'+INVENTORY_SIZE,
+    '箱子数量: '+chestData.size,
     '门状态: '+doorStates.size,
     '',
     '按 Shift+Enter+F3 关闭日志'];
@@ -2177,6 +2369,7 @@ function gameLoop(){
   uiProgress.inventory+=((showInventory?1:0)-uiProgress.inventory)*UI_ANIM_SPEED;
   uiProgress.crafting+=((showCraftingTable?1:0)-uiProgress.crafting)*UI_ANIM_SPEED;
   uiProgress.furnace+=((showFurnace?1:0)-uiProgress.furnace)*UI_ANIM_SPEED;
+  uiProgress.chest+=((showChest?1:0)-uiProgress.chest)*UI_ANIM_SPEED;
   updateSelectorAnim();
   if(!showInGameMenu){
     updatePhysics();updateDrops();updateFallingBlocks();updateSaplings();
@@ -2187,7 +2380,7 @@ function gameLoop(){
   drawLightOverlay();
   drawDrops();drawAnimals();drawPlayer();
   drawHUD();drawInventoryUI();drawCraftingTableUI();
-  drawFurnaceUI();drawCraftMessage();drawDragging();drawTouchControls();
+  drawFurnaceUI();drawChestUI();drawCraftMessage();drawDragging();drawTouchControls();
   drawItemTooltip();
   drawTouchRipples();
   if(showInGameMenu)drawInGameMenu();
