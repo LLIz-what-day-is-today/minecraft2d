@@ -62,12 +62,15 @@ const doorStates=new Map();
 const activeTouchMap={};
 
 /* ===== 箱子数据 ===== */
-const chestData=new Map();          // "x,y" -> Array(27)
+const chestData=new Map();
 let showChest=false,openChestX=0,openChestY=0;
 const CHEST_COLS=9,CHEST_ROWS=3,CHEST_SIZE=27,CHEST_TITLE_H=22;
-let pendingTouchDrag=null;          // 手机端待定拖拽
 
-/* ★ 触摸/鼠标光圈：跟随手指/鼠标移动 */
+/* ★ 长按 / 分割状态 */
+let pressInfo=null;
+let splitMode=null;
+const SPLIT_MAX_MS=1000;
+
 const touchRipples=new Map();
 
 let lastLeftTapTime=0;
@@ -148,6 +151,20 @@ function playBreakSound(){
     g.gain.exponentialRampToValueAtTime(0.0005,now+dur);
     src.connect(filter).connect(g).connect(ac.destination);
     src.start(now);src.stop(now+dur);
+  }catch(e){}
+}
+function playThrowSound(){
+  const ac=ensureAudioCtx();if(!ac)return;
+  try{
+    const now=ac.currentTime;
+    const osc=ac.createOscillator();const g=ac.createGain();
+    osc.type='triangle';
+    osc.frequency.setValueAtTime(320,now);
+    osc.frequency.exponentialRampToValueAtTime(180,now+0.1);
+    g.gain.setValueAtTime(0.08,now);
+    g.gain.exponentialRampToValueAtTime(0.0005,now+0.12);
+    osc.connect(g).connect(ac.destination);
+    osc.start(now);osc.stop(now+0.13);
   }catch(e){}
 }
 
@@ -553,8 +570,8 @@ const RECIPES={
   furnace:[
     {inputs:[{type:ITEM.BLOCK_COBBLE,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.STONE_ITEM,count:8},name:'8 原石 + 1 煤炭 → 8 石头'},
     {inputs:[{type:ITEM.BLOCK_LOG,count:5}],output:{type:ITEM.COAL,count:3},name:'5 原木 → 3 煤炭'},
-    {inputs:[{type:ITEM.RAW_MUTTON,count:1}],output:{type:ITEM.COOKED_MUTTON,count:1},name:'生羊肉 → 熟羊肉'},
-    {inputs:[{type:ITEM.RAW_CHICKEN,count:1}],output:{type:ITEM.COOKED_CHICKEN,count:1},name:'生鸡肉 → 熟鸡肉'}]};
+    {inputs:[{type:ITEM.RAW_MUTTON,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.COOKED_MUTTON,count:8},name:'8 生羊肉 + 1 煤炭 → 8 熟羊肉'},
+    {inputs:[{type:ITEM.RAW_CHICKEN,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.COOKED_CHICKEN,count:8},name:'8 生鸡肉 + 1 煤炭 → 8 熟鸡肉'}]};
 function canCraft(r){for(const i of r.inputs){let h=countItem(i.type);if(i.altType)h+=countItem(i.altType);if(h<i.count)return false;}return true;}
 function doCraft(r){
   if(!canCraft(r)){setCraftMessage('材料不足：'+r.name);return false;}
@@ -644,6 +661,20 @@ function getSlotArrayAndIndex(ref){
   if(ref.kind==='chest'&&showChest)return{arr:getChestArray(openChestX,openChestY),idx:ref.index};
   return null;
 }
+function getSlotScreenRect(ref){
+  if(!ref)return null;
+  if(ref.kind==='inv'){
+    const bar=getInventoryBarRect();
+    const col=ref.index%INV_COLS,row=Math.floor(ref.index/INV_COLS);
+    return{x:bar.x+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP),y:bar.y+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP),w:SLOT_SIZE,h:SLOT_SIZE};
+  }
+  if(ref.kind==='chest'){
+    const bar=getChestBarRect();
+    const col=ref.index%CHEST_COLS,row=Math.floor(ref.index/CHEST_COLS);
+    return{x:bar.x+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP),y:bar.y+CHEST_TITLE_H+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP),w:SLOT_SIZE,h:SLOT_SIZE};
+  }
+  return null;
+}
 function openChestAt(x,y){
   openChestX=x;openChestY=y;
   getChestArray(x,y);
@@ -652,6 +683,7 @@ function openChestAt(x,y){
 function closeChest(){
   if(!showChest)return;
   cancelDrag();
+  cancelSplit();
   showChest=false;
 }
 function startDragFromRef(ref,mx,my,touchId){
@@ -672,44 +704,118 @@ function cancelDrag(){
   else addItemToInventory(dragging.item.type,dragging.item.count);
   dragging=null;
 }
+/* ★ 扔物品到世界 */
+function throwItemStackToWorld(type,count){
+  if(count<=0)return;
+  const dir=player.facing;
+  const px=player.x+player.w/2;
+  const py=player.y+player.h*0.3;
+  let remaining=count;
+  while(remaining>0){
+    const c=Math.min(remaining,64);
+    drops.push({
+      x:px+dir*22+(Math.random()-0.5)*12,
+      y:py+(Math.random()-0.5)*12,
+      vx:dir*(3.5+Math.random()*2.5)+(Math.random()-0.5)*1.5,
+      vy:-4-Math.random()*2,
+      type:type,count:c,age:0,onGround:false,pickupDelay:100
+    });
+    remaining-=c;
+  }
+  playThrowSound();
+}
+/* ★ 融合拖拽 + 拖到外部扔出 */
 function finishDrag(mx,my){
   if(!dragging)return;
-  const item=dragging.item;
+  let item=dragging.item;
   const srcRef=dragging.ref;
   const ref=getSlotRefAtPoint(mx,my);
+  const src=getSlotArrayAndIndex(srcRef);
   if(ref){
     const ai=getSlotArrayAndIndex(ref);
     if(ai){
       const ti=ai.arr[ai.idx];
-      ai.arr[ai.idx]=item;
-      const src=getSlotArrayAndIndex(srcRef);
-      if(src&&ti)src.arr[src.idx]=ti;
-      else if(ti)addItemToInventory(ti.type,ti.count);
-      dragging=null;
-      return;
+      if(ti&&ti.type===item.type){
+        /* 相同物品：融合 */
+        const total=ti.count+item.count;
+        if(total<=64){
+          ti.count=total;
+          item=null;
+        }else{
+          ti.count=64;
+          item.count=total-64;
+        }
+      }else{
+        /* 不同物品：交换 */
+        ai.arr[ai.idx]=item;
+        if(ti){
+          if(src)src.arr[src.idx]=ti;
+          else addItemToInventory(ti.type,ti.count);
+        }
+        item=null;
+      }
     }
   }
-  const src=getSlotArrayAndIndex(srcRef);
-  if(src&&!src.arr[src.idx])src.arr[src.idx]=item;
-  else addItemToInventory(item.type,item.count);
+  if(item){
+    /* 拖到有效格子外：扔到世界 */
+    throwItemStackToWorld(item.type,item.count);
+  }
   dragging=null;
 }
-function dropChestContents(x,y){
-  const k=x+','+y;
-  const arr=chestData.get(k);
-  if(!arr)return;
-  for(let i=0;i<CHEST_SIZE;i++){
-    const it=arr[i];
-    if(it)spawnDrop(x,y,it.type,it.count);
-  }
-  chestData.delete(k);
+/* ★ 长按分割（百分比扔出） */
+function startSplitMode(ref,touchId,startX,startY){
+  if(dragging)return;
+  const ai=getSlotArrayAndIndex(ref);
+  if(!ai||!ai.arr[ref.index])return;
+  splitMode={ref,touchId,progress:0,startTime:Date.now(),startX:startX||0,startY:startY||0};
+}
+function cancelSplit(){
+  if(splitMode)splitMode=null;
+}
+function executeSplit(){
+  if(!splitMode)return;
+  const sm=splitMode;
+  splitMode=null;
+  const ai=getSlotArrayAndIndex(sm.ref);
+  if(!ai||!ai.arr[sm.ref.index])return;
+  const it=ai.arr[sm.ref.index];
+  const total=it.count;
+  const pct=Math.max(0,Math.min(100,sm.progress));
+  let throwCount=Math.round(total*pct/100);
+  if(throwCount<0)throwCount=0;
+  if(throwCount>total)throwCount=total;
+  const keep=total-throwCount;
+  if(keep<=0)ai.arr[sm.ref.index]=null;
+  else it.count=keep;
+  if(throwCount>0)throwItemStackToWorld(it.type,throwCount);
+}
+function drawSplitBar(){
+  if(!splitMode)return;
+  const rect=getSlotScreenRect(splitMode.ref);
+  if(!rect)return;
+  const barH=8;
+  let by=rect.y-barH-4;
+  if(by<0)by=rect.y+rect.h+4;
+  const bx=rect.x;
+  ctx.save();
+  ctx.fillStyle='rgba(40,40,40,0.92)';
+  ctx.fillRect(bx,by,rect.w,barH);
+  ctx.fillStyle='#4caf50';
+  ctx.fillRect(bx,by,rect.w*splitMode.progress/100,barH);
+  ctx.strokeStyle='rgba(255,255,255,0.7)';
+  ctx.lineWidth=1;
+  ctx.strokeRect(bx,by,rect.w,barH);
+  ctx.fillStyle='#fff';
+  ctx.font='bold 10px '+FONT;
+  ctx.textAlign='center';ctx.textBaseline='bottom';
+  ctx.fillText(Math.round(splitMode.progress)+'%',bx+rect.w/2,by-1);
+  ctx.restore();
 }
 
 function dropSelectedItem(){
   const item=inventory[selectedSlot];
   if(!item||item.count<=0)return;
-  const dir=player.facing;
-  drops.push({x:player.x+player.w/2+dir*(player.w/2+4),y:player.y+player.h*0.3,vx:dir*4.5+(Math.random()-0.5)*1.2,vy:-3.5-Math.random()*1.2,type:item.type,count:1,age:0,onGround:false,pickupDelay:40});
+  throwItemStackToWorld(item.type,1);
   item.count--;
   if(item.count<=0)inventory[selectedSlot]=null;
 }
@@ -728,7 +834,7 @@ function resetWorld(seed){
   camera.x=0;camera.y=0;
   selectorInitialized=false;boxInitialized=false;
   showInventory=false;showCraftingTable=false;showFurnace=false;showChest=false;
-  dragging=null;pendingTouchDrag=null;
+  dragging=null;pressInfo=null;splitMode=null;
   uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;uiProgress.chest=0;
   gameTime=0;dayLight=1;isNight=false;
   animalSpawnTimer=0;
@@ -746,7 +852,6 @@ function loadSaveCode(code){
   chunks.clear();blockChanges.clear();lightMap.clear();doorStates.clear();
   chestData.clear();
   if(Array.isArray(d.changes))for(const c of d.changes)if(Array.isArray(c)&&c.length===3)blockChanges.set(c[0]+','+c[1],c[2]);
-  /* 箱子数据（旧存档没有 chests 字段，自动兼容） */
   if(Array.isArray(d.chests))for(const c of d.chests){
     if(Array.isArray(c)&&c.length>=3&&Array.isArray(c[2])){
       const arr=new Array(CHEST_SIZE).fill(null);
@@ -771,7 +876,7 @@ function loadSaveCode(code){
   player.spawnX=player.x;player.spawnY=player.y;
   selectorInitialized=false;boxInitialized=false;
   showInventory=false;showCraftingTable=false;showFurnace=false;showChest=false;
-  dragging=null;pendingTouchDrag=null;
+  dragging=null;pressInfo=null;splitMode=null;
   uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;uiProgress.chest=0;
   gameState='playing';menuSlide=0;gameTime=0;dayLight=1;isNight=false;
   animalSpawnTimer=0;
@@ -857,7 +962,7 @@ document.addEventListener('keydown',e=>{
   if(gameState==='playing'){
     if(document.getElementById('saveOverlay').style.display==='flex')return;
     if(e.key==='Escape'){
-      if(showInventory||showCraftingTable||showFurnace||showChest){closeChest();showInventory=false;showCraftingTable=false;showFurnace=false;return;}
+      if(showInventory||showCraftingTable||showFurnace||showChest){closeChest();cancelSplit();showInventory=false;showCraftingTable=false;showFurnace=false;return;}
       if(showInGameMenu){if(showOptionsMenu){showOptionsMenu=false;return;}showInGameMenu=false;return;}
       showInGameMenu=true;showOptionsMenu=false;return;
     }
@@ -865,7 +970,7 @@ document.addEventListener('keydown',e=>{
     if(key==='q'&&!e.repeat){if(showInventory||showCraftingTable||showFurnace||showChest)return;dropSelectedItem();return;}
     if(key==='e'&&!e.repeat){
       if(showInventory||showCraftingTable||showFurnace||showChest){
-        closeChest();showInventory=false;showCraftingTable=false;showFurnace=false;
+        closeChest();cancelSplit();showInventory=false;showCraftingTable=false;showFurnace=false;
       }else showInventory=true;
     }
     if(key==='h'&&!e.repeat){inventoryBarHidden=!inventoryBarHidden;return;}
@@ -1089,7 +1194,7 @@ function handleTouchMenu(mx,my,ox){
 function handlePhoneButtonPress(btnName,touchId){
   if(btnName==='menu'){showInGameMenu=true;return;}
   if(btnName==='inventory'){
-    if(showInventory){showInventory=false;}
+    if(showInventory){showInventory=false;cancelSplit();}
     else{showInventory=true;showCraftingTable=false;showFurnace=false;closeChest();}
     return;
   }
@@ -1122,10 +1227,20 @@ canvas.addEventListener('touchstart',e=>{
         if(btnName==='menu'||btnName==='inventory'||btnName==='hideInv'||btnName==='sneak'||btnName==='down'){touchActive[btnName]=false;}
         continue;
       }
-      /* ★ 手机端：先判断是否点在物品格（箱子或物品栏）上 */
       const ref=getSlotRefAtPoint(mx,my);
       if(ref){
-        pendingTouchDrag={touchId:t.identifier,ref,startX:mx,startY:my};
+        const ai=getSlotArrayAndIndex(ref);
+        if(ai&&ai.arr[ref.index]){
+          const pid=t.identifier;
+          pressInfo={ref,startX:mx,startY:my,touchId:t.identifier,timer:setTimeout(()=>{
+            if(pressInfo&&pressInfo.touchId===pid){
+              startSplitMode(pressInfo.ref,pid,pressInfo.startX,pressInfo.startY);
+              pressInfo=null;
+            }
+          },400)};
+        }else{
+          if(ref.kind==='inv')selectedSlot=ref.index;
+        }
         continue;
       }
       handleTouchGame(mx,my);
@@ -1138,7 +1253,6 @@ canvas.addEventListener('touchstart',e=>{
     }else{handleTouchGame(mx,my);}
   }
 },{passive:false});
-/* ★ 触摸移动：更新光圈位置 + 启动/更新拖拽 */
 canvas.addEventListener('touchmove',e=>{
   if(!phoneMode)return;
   e.preventDefault();
@@ -1147,11 +1261,12 @@ canvas.addEventListener('touchmove',e=>{
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
     const r=touchRipples.get(t.identifier);
     if(r){r.x=mx;r.y=my;}
-    if(pendingTouchDrag&&pendingTouchDrag.touchId===t.identifier&&!dragging){
-      const dx=mx-pendingTouchDrag.startX,dy=my-pendingTouchDrag.startY;
+    if(pressInfo&&pressInfo.touchId===t.identifier&&!dragging){
+      const dx=mx-pressInfo.startX,dy=my-pressInfo.startY;
       if(dx*dx+dy*dy>64){
-        startDragFromRef(pendingTouchDrag.ref,mx,my,t.identifier);
-        pendingTouchDrag=null;
+        clearTimeout(pressInfo.timer);
+        startDragFromRef(pressInfo.ref,mx,my,t.identifier);
+        pressInfo=null;
       }
     }
     if(dragging&&dragging.touchId===t.identifier){dragging.x=mx;dragging.y=my;}
@@ -1180,10 +1295,13 @@ canvas.addEventListener('touchend',e=>{
   for(const t of e.changedTouches){
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
-    if(pendingTouchDrag&&pendingTouchDrag.touchId===t.identifier){
-      const ref=pendingTouchDrag.ref;
-      if(ref.kind==='inv')selectedSlot=ref.index;
-      pendingTouchDrag=null;
+    if(pressInfo&&pressInfo.touchId===t.identifier){
+      clearTimeout(pressInfo.timer);
+      if(pressInfo.ref.kind==='inv')selectedSlot=pressInfo.ref.index;
+      pressInfo=null;
+    }
+    if(splitMode&&splitMode.touchId===t.identifier){
+      executeSplit();
     }
     if(dragging&&dragging.touchId===t.identifier){
       finishDrag(mx,my);
@@ -1197,7 +1315,8 @@ canvas.addEventListener('touchcancel',e=>{
   if(!phoneMode)return;
   e.preventDefault();
   for(const t of e.changedTouches){
-    if(pendingTouchDrag&&pendingTouchDrag.touchId===t.identifier)pendingTouchDrag=null;
+    if(pressInfo&&pressInfo.touchId===t.identifier){clearTimeout(pressInfo.timer);pressInfo=null;}
+    if(splitMode&&splitMode.touchId===t.identifier)cancelSplit();
     if(dragging&&dragging.touchId===t.identifier)finishDrag(dragging.x,dragging.y);
     releaseTouchById(t.identifier);
     touchRipples.delete(t.identifier);
@@ -1257,8 +1376,15 @@ canvas.addEventListener('mousemove',e=>{
   mouseX=mx;mouseY=my;
   const wp=screenToWorld(mx,my);
   mouseWorldX=wp.x;mouseWorldY=wp.y;
+  if(pressInfo&&pressInfo.touchId===undefined&&!dragging){
+    const dx=mx-pressInfo.startX,dy=my-pressInfo.startY;
+    if(dx*dx+dy*dy>64){
+      clearTimeout(pressInfo.timer);
+      startDragFromRef(pressInfo.ref,mx,my,undefined);
+      pressInfo=null;
+    }
+  }
   if(dragging){dragging.x=mx;dragging.y=my;}
-  /* ★ 鼠标光圈跟随鼠标移动 */
   const mr=touchRipples.get('mouse');
   if(mr){mr.x=mx;mr.y=my;}
   if(gameState==='playing'&&!showInGameMenu&&!showInventory&&!showCraftingTable&&!showFurnace&&!showChest){
@@ -1383,10 +1509,22 @@ canvas.addEventListener('mousedown',e=>{
     }
     if(showFurnace)return;
   }
-  /* ★ 箱子/物品栏拖拽起点 */
   if(e.button===0){
     const ref=getSlotRefAtPoint(mx,my);
-    if(ref){startDragFromRef(ref,mx,my,undefined);return;}
+    if(ref){
+      const ai=getSlotArrayAndIndex(ref);
+      if(ai&&ai.arr[ref.index]){
+        pressInfo={ref,startX:mx,startY:my,touchId:undefined,timer:setTimeout(()=>{
+          if(pressInfo&&pressInfo.touchId===undefined){
+            startSplitMode(pressInfo.ref,undefined,pressInfo.startX,pressInfo.startY);
+            pressInfo=null;
+          }
+        },400)};
+      }else{
+        if(ref.kind==='inv')selectedSlot=ref.index;
+      }
+      return;
+    }
   }
   const worldCol=Math.floor(mouseWorldX/TILE);
   const worldRow=Math.floor(mouseWorldY/TILE);
@@ -1440,14 +1578,23 @@ canvas.addEventListener('mouseup',e=>{
   phoneActiveButton=null;
   touchRipples.delete('mouse');
   if(gameState!=='playing'||isLoading)return;
-  if(!dragging)return;
-  if(dragging.touchId!==undefined)return; /* 触屏拖拽交给 touchend */
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  if(pressInfo&&pressInfo.touchId===undefined){
+    clearTimeout(pressInfo.timer);
+    if(pressInfo.ref.kind==='inv')selectedSlot=pressInfo.ref.index;
+    pressInfo=null;
+  }
+  if(splitMode&&splitMode.touchId===undefined){
+    executeSplit();
+    return;
+  }
+  if(!dragging)return;
+  if(dragging.touchId!==undefined)return;
   finishDrag(mx,my);
 });
-canvas.addEventListener('mouseleave',e=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');cancelDrag();});
-window.addEventListener('blur',()=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');for(const k in keys)keys[k]=false;cancelDrag();});
+canvas.addEventListener('mouseleave',e=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');cancelDrag();cancelSplit();if(pressInfo){clearTimeout(pressInfo.timer);pressInfo=null;}});
+window.addEventListener('blur',()=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');for(const k in keys)keys[k]=false;cancelDrag();cancelSplit();if(pressInfo){clearTimeout(pressInfo.timer);pressInfo=null;}});
 document.getElementById('saveConfirmBtn').addEventListener('click',()=>{allowClose=true;location.reload();});
 document.getElementById('saveCancelBtn').addEventListener('click',()=>{document.getElementById('saveOverlay').style.display='none';});
 function spawnDrop(wc,wr,t,c){
@@ -1828,7 +1975,6 @@ function drawHealth(){
   }
 }
 function drawInventoryBar(){
-  /* ★ 打开箱子时强制显示物品栏 */
   const target=(inventoryBarHidden&&!showChest)?1:0;
   inventoryBarAnim+=(target-inventoryBarAnim)*0.2;
   if(inventoryBarAnim>0.99)return;
@@ -1861,7 +2007,6 @@ function drawInventoryBar(){
   }
   ctx.restore();
 }
-/* ★ 箱子界面 */
 function drawChestUI(){
   const p=uiProgress.chest;if(p<0.005)return;
   const e=easeOutCubic(p),o=(1-e)*(canvas.height*0.7);
@@ -1904,6 +2049,7 @@ function drawDragging(){
 }
 function drawItemTooltip(){
   if(gameState!=='playing')return;
+  if(phoneMode)return;
   if(showInGameMenu||showInventory||showCraftingTable||showFurnace)return;
   if(inventoryBarHidden&&!showChest)return;
   const slot=getSlotAtPoint(mouseX,mouseY);
@@ -1929,7 +2075,6 @@ function drawItemTooltip(){
   ctx.fillText(name,tx+tw/2,ty+th/2);
   ctx.restore();
 }
-/* ★ 基岩版风格光圈：白色半透明圆点，跟随手指/鼠标移动 */
 function drawTouchRipples(){
   if(!phoneMode)return;
   if(gameState!=='playing')return;
@@ -2366,6 +2511,10 @@ function gameLoop(){
     if(loadingAlpha>0){ctx.save();ctx.globalAlpha=loadingAlpha;drawLoadingScreen();ctx.restore();}
     requestAnimationFrame(gameLoop);return;
   }
+  if(splitMode){
+    const elapsed=Date.now()-splitMode.startTime;
+    splitMode.progress=Math.min(100,elapsed/SPLIT_MAX_MS*100);
+  }
   uiProgress.inventory+=((showInventory?1:0)-uiProgress.inventory)*UI_ANIM_SPEED;
   uiProgress.crafting+=((showCraftingTable?1:0)-uiProgress.crafting)*UI_ANIM_SPEED;
   uiProgress.furnace+=((showFurnace?1:0)-uiProgress.furnace)*UI_ANIM_SPEED;
@@ -2383,6 +2532,7 @@ function gameLoop(){
   drawFurnaceUI();drawChestUI();drawCraftMessage();drawDragging();drawTouchControls();
   drawItemTooltip();
   drawTouchRipples();
+  drawSplitBar();
   if(showInGameMenu)drawInGameMenu();
   drawLog();
   if(loadingAlpha>0){ctx.save();ctx.globalAlpha=loadingAlpha;drawLoadingScreen();ctx.restore();}
