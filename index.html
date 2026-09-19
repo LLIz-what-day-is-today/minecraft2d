@@ -42,7 +42,7 @@ const PLAYER_W=TILE*0.75,PLAYER_H=TILE*1.8,SNEAK_H=TILE*1.75;
 const DAY_LENGTH=36000;
 const CACHE_KEY='mc2d_tex_cache_v4',CACHE_DURATION=24*60*60*1000;
 const ANIMAL_MAX=12,ANIMAL_SPAWN_INTERVAL=300,ANIMAL_SPAWN_RADIUS=24;
-const MONSTER_MAX=10,MONSTER_SPAWN_INTERVAL=400,MONSTER_SPAWN_RADIUS=28;
+const MONSTER_MAX=10,MONSTER_SPAWN_INTERVAL=400,MONSTER_SPAWN_RADIUS=32;
 const UI_HUGE=999999999999;
 let gameState='loading',showInGameMenu=false,showOptionsMenu=false,showNameEditor=false;
 let playerName=localStorage.getItem('mc2d_name')||'Steve';
@@ -260,8 +260,8 @@ const SPECIAL_ITEM_URLS={
   [ITEM.COOKED_MUTTON]:'https://zh.minecraft.wiki/images/Cooked_Mutton_JE3_BE2.png',
   [ITEM.RAW_CHICKEN]:'https://zh.minecraft.wiki/images/Raw_Chicken_JE3_BE3.png',
   [ITEM.COOKED_CHICKEN]:'https://zh.minecraft.wiki/images/Cooked_Chicken_JE2_BE2.png',
-  [ITEM.ROTTEN_FLESH]:'https://zh.minecraft.wiki/images/Rotten_Flesh_JE3_BE2.png',
-  [ITEM.STRING]:'https://zh.minecraft.wiki/images/String_JE2_BE1.png',
+  [ITEM.ROTTEN_FLESH]:'https://zh.minecraft.wiki/images/Rotten_Flesh_JE2_BE2.png?dc71e',
+  [ITEM.STRING]:'https://zh.minecraft.wiki/images/Invicon_String.png?e7cbf',
   [ITEM.SPIDER_EYE]:'https://zh.minecraft.wiki/images/Spider_Eye_JE2_BE2.png'};
 const STEVE_URL='https://zh.minecraft.wiki/images/thumb/Steve_JE5.png/111px-Steve_JE5.png?0b84d';
 const HEART_URL='https://zh.minecraft.wiki/images/Heart_%28icon%29.png?16571';
@@ -270,14 +270,14 @@ const LOADING_BG_URL='https://zh.minecraft.wiki/images/thumb/End_Poem_background
 const MENU_BG_URL=LOADING_BG_URL;
 const SHEEP_URL='https://zh.minecraft.wiki/images/thumb/White_Sheep_JE6.png/160px-White_Sheep_JE6.png?ccbd6';
 const CHICKEN_URL='https://zh.minecraft.wiki/images/thumb/Chicken_JE2_BE2.png/100px-Chicken_JE2_BE2.png?a9bbd';
-const ZOMBIE_URL='https://zh.minecraft.wiki/images/thumb/Zombie_JE2_BE2.png/150px-Zombie_JE2_BE2.png?b8c7b';
+/* ★ 僵尸已删除，只保留蜘蛛 */
 const SPIDER_URL='https://zh.minecraft.wiki/images/thumb/Spider_JE5_BE4.png/200px-Spider_JE5_BE4.png?6206b';
 const BTN_NORMAL_URL='https://zh.minecraft.wiki/images/thumb/Java_edition_button.png/150px-Java_edition_button.png?f130c';
 const BTN_HOVER_URL='https://zh.minecraft.wiki/images/thumb/Java_edition_button_highlighted.png/150px-Java_edition_button_highlighted.png?73282';
 const BTN_DISABLED_URL='https://zh.minecraft.wiki/images/thumb/Java_edition_button_disabled.png/150px-Java_edition_button_disabled.png?4e490';
 const tileCanvasCache={},itemIconCache={};
 let playerSkin=null,playerSkinAspect=0.6,heartIcon=null,logoImage=null,loadingBgImage=null,menuBgImage=null;
-let sheepImage=null,chickenImage=null,zombieImage=null,spiderImage=null;
+let sheepImage=null,chickenImage=null,spiderImage=null;
 let btnNormal=null,btnHover=null,btnDisabled=null;
 let isLoading=true,loadingAlpha=1,loadingStartTime=0,loadTexturesFinished=false;
 const LOADING_FADE_SPEED=0.02,MIN_LOADING_TIME=600;
@@ -396,7 +396,7 @@ function loadTextures(callback){
   types.forEach(type=>{tileCanvasCache[type]=createFallbackTile(type);});
   const urlTypes=types.filter(t=>TEXTURE_URLS[t]);
   let loaded=0;
-  const total=urlTypes.length+Object.keys(SPECIAL_ITEM_URLS).length+11;
+  const total=urlTypes.length+Object.keys(SPECIAL_ITEM_URLS).length+10;
   downloadTotal=total;downloadProgress=0;
   function checkDone(){
     if(loadTexturesFinished)return;
@@ -430,7 +430,6 @@ function loadTextures(callback){
   loadOne(i=>{loadingBgImage=i;menuBgImage=i;}).src=LOADING_BG_URL;
   loadOne(i=>{sheepImage=i;}).src=SHEEP_URL;
   loadOne(i=>{chickenImage=i;}).src=CHICKEN_URL;
-  loadOne(i=>{zombieImage=i;}).src=ZOMBIE_URL;
   loadOne(i=>{spiderImage=i;}).src=SPIDER_URL;
   loadOne(i=>{btnNormal=i;}).src=BTN_NORMAL_URL;
   loadOne(i=>{btnHover=i;}).src=BTN_HOVER_URL;
@@ -1058,7 +1057,7 @@ function phoneWorldDown(mx,my){
     if(wx>=a.x&&wx<=a.x+a.w&&wy>=a.y&&wy<=a.y+a.h){a.health-=4;playBreakSound();return;}
   }
   for(const m of monsters){
-    if(wx>=m.x&&wx<=m.x+m.w&&wy>=m.y&&wy<=m.y+m.h){m.health-=4;playBreakSound();return;}
+    if(wx>=m.x&&wx<=m.x+m.w&&wy>=m.y&&wy<=m.y+m.h){m.health-=4;m.hurtTimer=10;playBreakSound();return;}
   }
   const worldCol=Math.floor(wx/TILE);
   const worldRow=Math.floor(wy/TILE);
@@ -1614,20 +1613,19 @@ function spawnDrop(wc,wr,t,c){
   drops.push({x:wc*TILE+TILE/2,y:wr*TILE+TILE/2,vx:(Math.random()-0.5)*2.5,vy:-3-Math.random()*1.5,type:t,count:c||1,age:0,onGround:false,pickupDelay:0});
 }
 function spawnAnimal(type,x,y){animals.push({type,x,y,vx:0,vy:0,w:TILE,h:TILE,health:10,maxHealth:10,onGround:false,facing:1,wanderTimer:0,wanderDir:0,age:0});}
+/* ★ 只生成蜘蛛 */
 function spawnMonster(type,x,y){
-  if(type==='zombie'){
-    monsters.push({type,x,y,vx:0,vy:0,w:TILE*0.6,h:TILE*1.9,health:20,maxHealth:20,onGround:false,facing:1,attackCooldown:0,hurtTimer:0,burnTimer:0});
-  }else if(type==='spider'){
+  if(type==='spider'){
     monsters.push({type,x,y,vx:0,vy:0,w:TILE*1.4,h:TILE*0.9,health:16,maxHealth:16,onGround:false,facing:1,attackCooldown:0,hurtTimer:0,burnTimer:0});
   }
 }
-/* ★ 怪物更新：僵尸与蜘蛛追踪玩家 + 白天阳光伤害 */
+/* ★ 只更新蜘蛛 */
 function updateMonsters(){
   for(let i=monsters.length-1;i>=0;i--){
     const m=monsters[i];
     m.attackCooldown=Math.max(0,m.attackCooldown-1);
     if(m.hurtTimer>0)m.hurtTimer--;
-    /* ★ 白天阳光伤害：白天且头顶无遮挡时持续扣血 */
+    /* 白天阳光伤害 */
     if(!isNight){
       const col=Math.floor((m.x+m.w/2)/TILE);
       let exposed=true;
@@ -1644,7 +1642,7 @@ function updateMonsters(){
     }else{m.burnTimer=0;}
     const dx=player.x-m.x,dy=player.y-m.y;
     const dist=Math.sqrt(dx*dx+dy*dy);
-    let moveSpeed=m.type==='zombie'?0.5:0.8;
+    const moveSpeed=0.8;
     if(dist<200&&dist>10){
       m.vx=Math.sign(dx)*moveSpeed;
       m.facing=m.vx>0?1:-1;
@@ -1662,31 +1660,28 @@ function updateMonsters(){
       if(g!==BLOCK.AIR&&g!==BLOCK.GLASS&&g!==BLOCK.TORCH&&g!==BLOCK.LADDER&&g!==BLOCK.SAPLING&&g!==BLOCK.BED&&g!==BLOCK.CHEST){m.y=gr*TILE-m.h;m.vy=0;m.onGround=true;}
       else m.onGround=false;
     }
-    const attackRange=m.type==='zombie'?TILE*0.8:TILE*1.2;
+    const attackRange=TILE*1.2;
     if(dist<attackRange&&m.attackCooldown<=0){
-      const dmg=m.type==='zombie'?3:2;
-      player.health=Math.max(0,player.health-dmg);
+      player.health=Math.max(0,player.health-2);
       m.attackCooldown=40;
       playHurtSound();
       if(player.health<=0){player.health=player.maxHealth;player.x=player.spawnX;player.y=player.spawnY;player.vy=0;}
     }
     if(m.health<=0){
       const mx=Math.floor(m.x/TILE),my=Math.floor(m.y/TILE);
-      if(m.type==='zombie'){spawnDrop(mx,my,ITEM.ROTTEN_FLESH,1+Math.floor(Math.random()*2));}
-      else if(m.type==='spider'){
-        spawnDrop(mx,my,ITEM.STRING,1+Math.floor(Math.random()*2));
-        if(Math.random()<0.33)spawnDrop(mx,my,ITEM.SPIDER_EYE,1);
-      }
+      spawnDrop(mx,my,ITEM.STRING,1+Math.floor(Math.random()*2));
+      if(Math.random()<0.33)spawnDrop(mx,my,ITEM.SPIDER_EYE,1);
       monsters.splice(i,1);
     }
   }
 }
+/* ★ 只生成蜘蛛 */
 function updateMonsterSpawning(){
   monsterSpawnTimer++;
   if(monsterSpawnTimer<MONSTER_SPAWN_INTERVAL)return;
   monsterSpawnTimer=0;
   if(monsters.length>=MONSTER_MAX)return;
-  for(let attempt=0;attempt<5;attempt++){
+  for(let attempt=0;attempt<8;attempt++){
     const angle=Math.random()*Math.PI*2;
     const dist=10+Math.random()*(MONSTER_SPAWN_RADIUS-10);
     const targetX=Math.floor((player.x/TILE)+Math.cos(angle)*dist);
@@ -1696,12 +1691,13 @@ function updateMonsterSpawning(){
     const space1=getBlock(targetX,targetY);
     const space2=getBlock(targetX,targetY-1);
     if(space1===BLOCK.AIR&&space2===BLOCK.AIR&&(groundBlock===BLOCK.GRASS||groundBlock===BLOCK.DIRT||groundBlock===BLOCK.STONE||groundBlock===BLOCK.COBBLE)){
-      const light=getLight(targetX,targetY);
-      if(light>7)continue;
+      const blockLight=getLight(targetX,targetY);
+      const envLight=dayLight*15;
+      const finalLight=Math.max(blockLight,envLight);
+      if(finalLight>7)continue;
       const dx=targetX*TILE-player.x,dy=targetY*TILE-player.y;
-      if(dx*dx+dy*dy<6*TILE*6*TILE)continue;
-      const type=Math.random()<0.6?'zombie':'spider';
-      spawnMonster(type,targetX*TILE,targetY*TILE);
+      if(dx*dx+dy*dy<4*TILE*4*TILE)continue;
+      spawnMonster('spider',targetX*TILE,targetY*TILE);
       return;
     }
   }
@@ -2028,20 +2024,19 @@ function drawAnimals(){
     }
   }
 }
+/* ★ 只绘制蜘蛛 */
 function drawMonsters(){
   for(const m of monsters){
     const sx=m.x-camera.x,sy=m.y-camera.y;
-    const img=m.type==='zombie'?zombieImage:spiderImage;
-    if(img&&img.complete){
+    if(spiderImage&&spiderImage.complete){
       ctx.save();ctx.imageSmoothingEnabled=false;
       if(m.hurtTimer>0)ctx.globalAlpha=0.6;
-      if(m.facing>0){ctx.translate(sx+m.w,sy);ctx.scale(-1,1);ctx.drawImage(img,0,0,m.w,m.h);}
-      else ctx.drawImage(img,sx,sy,m.w,m.h);
+      if(m.facing>0){ctx.translate(sx+m.w,sy);ctx.scale(-1,1);ctx.drawImage(spiderImage,0,0,m.w,m.h);}
+      else ctx.drawImage(spiderImage,sx,sy,m.w,m.h);
       ctx.restore();
     }else{
       ctx.save();
-      if(m.type==='zombie'){ctx.fillStyle='#3a7a3a';ctx.fillRect(sx,sy,m.w,m.h);}
-      else{ctx.fillStyle='#4a2a2a';ctx.fillRect(sx,sy,m.w,m.h);}
+      ctx.fillStyle='#4a2a2a';ctx.fillRect(sx,sy,m.w,m.h);
       ctx.restore();
     }
   }
