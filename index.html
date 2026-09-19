@@ -73,6 +73,18 @@ const SPLIT_MAX_MS=1000;
 
 const touchRipples=new Map();
 
+/* ★ 触动光圈大小设置 */
+const RIPPLE_SIZE_MIN = 8;
+const RIPPLE_SIZE_MAX = 80;
+const RIPPLE_SIZE_DEFAULT = 28;
+let touchRippleSize = (function(){
+  const v = parseFloat(localStorage.getItem('mc2d_ripple_size'));
+  if(isNaN(v) || v < RIPPLE_SIZE_MIN || v > RIPPLE_SIZE_MAX) return RIPPLE_SIZE_DEFAULT;
+  return v;
+})();
+let optionsSliderDragging = false;
+let optionsSliderTouchId = null;
+
 let lastLeftTapTime=0;
 let lastRightTapTime=0;
 const DOUBLE_TAP_MS=300;
@@ -114,11 +126,16 @@ const virtualKeyboard = {
   sliderTouchId: null,
   sliderTrackLeft: 0,
   sliderTrackW: 0,
+  /* ★ 从右移出动画 */
+  animProgress: 0,
+  animTarget: 0,
+  animOffsetX: 0,
 };
 
 /* ★ 键盘缩放范围 */
 const KEYBOARD_MIN_SCALE = 0.55;
 const KEYBOARD_MAX_SCALE = 1.60;
+const KEYBOARD_ANIM_SPEED = 0.15;
 
 /* ★ 完整键盘映射（不含 Win 和菜单键） */
 const KEY_MAP = {
@@ -184,7 +201,6 @@ const KEY_MAP = {
   'ArrowDown': {key:'ArrowDown', code:'ArrowDown', keyCode:40},
   'ArrowRight': {key:'ArrowRight', code:'ArrowRight', keyCode:39},
   'ArrowUp': {key:'ArrowUp', code:'ArrowUp', keyCode:38},
-  /* ★ F 类按键 F1 ~ F12 */
   'F1':  {key:'F1',  code:'F1',  keyCode:112, noRepeat:true},
   'F2':  {key:'F2',  code:'F2',  keyCode:113, noRepeat:true},
   'F3':  {key:'F3',  code:'F3',  keyCode:114, noRepeat:true},
@@ -199,7 +215,7 @@ const KEY_MAP = {
   'F12': {key:'F12', code:'F12', keyCode:123, noRepeat:true},
 };
 
-/* ★ 键盘布局（首行为 F1~F12，共 6 行，每行 15 单位宽） */
+/* ★ 键盘布局（首行为 F1~F12，共 6 行） */
 const KEY_ROWS = [
   [
     {c:'F1',u:1.25},  {c:'F2',u:1.25},  {c:'F3',u:1.25},  {c:'F4',u:1.25},
@@ -1089,6 +1105,92 @@ function getActiveInput(){
   return null;
 }
 
+/* ★ 触动光圈大小拖动条 - 几何与交互 */
+function getRippleSliderRect(){
+  const w = Math.min(320, canvas.width * 0.75);
+  return {
+    trackX: (canvas.width - w) / 2,
+    trackY: canvas.height * 0.35 + 84,
+    trackW: w,
+    trackH: 8,
+    touchPadX: 26,
+    touchPadY: 26
+  };
+}
+function getRippleSizeFromX(mx){
+  const r = getRippleSliderRect();
+  let t = (mx - r.trackX) / r.trackW;
+  t = Math.max(0, Math.min(1, t));
+  return RIPPLE_SIZE_MIN + t * (RIPPLE_SIZE_MAX - RIPPLE_SIZE_MIN);
+}
+function beginOptionsSliderDrag(mx, touchId){
+  optionsSliderDragging = true;
+  optionsSliderTouchId = touchId;
+  updateOptionsSliderDrag(mx);
+}
+function updateOptionsSliderDrag(mx){
+  touchRippleSize = getRippleSizeFromX(mx);
+}
+function endOptionsSliderDrag(){
+  if(optionsSliderDragging){
+    try{localStorage.setItem('mc2d_ripple_size', String(Math.round(touchRippleSize)));}catch(e){}
+  }
+  optionsSliderDragging = false;
+  optionsSliderTouchId = null;
+}
+function handleOptionsSliderStart(mx, my, touchId){
+  const r = getRippleSliderRect();
+  if(mx >= r.trackX - r.touchPadX && mx <= r.trackX + r.trackW + r.touchPadX &&
+     my >= r.trackY - r.touchPadY && my <= r.trackY + r.trackH + r.touchPadY){
+    beginOptionsSliderDrag(mx, touchId);
+    return true;
+  }
+  return false;
+}
+/* 把屏幕坐标转换为选项菜单逻辑坐标（菜单有滑入偏移） */
+function toOptionsLogicalX(mx){
+  if(gameState === 'playing') return mx;
+  const ease = easeOutCubic(menuSlide);
+  return mx - (1 - ease) * canvas.width;
+}
+function drawRippleSizeSlider(){
+  const r = getRippleSliderRect();
+  /* 标题 */
+  ctx.fillStyle = '#fff';
+  ctx.font = '16px ' + FONT;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('触动光圈大小：' + Math.round(touchRippleSize) + ' px', canvas.width / 2, r.trackY - 14);
+  /* 轨道背景 */
+  ctx.fillStyle = 'rgba(30,30,50,0.95)';
+  ctx.fillRect(r.trackX, r.trackY, r.trackW, r.trackH);
+  /* 进度 */
+  const t = (touchRippleSize - RIPPLE_SIZE_MIN) / (RIPPLE_SIZE_MAX - RIPPLE_SIZE_MIN);
+  ctx.fillStyle = 'rgba(90,140,220,0.9)';
+  ctx.fillRect(r.trackX, r.trackY, r.trackW * t, r.trackH);
+  /* 边框 */
+  ctx.strokeStyle = 'rgba(160,160,200,0.85)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(r.trackX + 0.5, r.trackY + 0.5, r.trackW - 1, r.trackH - 1);
+  /* 滑块 */
+  const hx = r.trackX + r.trackW * t;
+  const hy = r.trackY + r.trackH / 2;
+  ctx.beginPath();
+  ctx.arc(hx, hy, 10, 0, Math.PI * 2);
+  ctx.fillStyle = '#cfd8ff';
+  ctx.fill();
+  ctx.strokeStyle = '#5a7ac0';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  /* 左右端点标记 */
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.font = '11px ' + FONT;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(RIPPLE_SIZE_MIN, r.trackX, r.trackY + r.trackH + 6);
+  ctx.fillText(RIPPLE_SIZE_MAX, r.trackX + r.trackW, r.trackY + r.trackH + 6);
+}
+
 /* ★★★ 虚拟键盘 - 核心函数 ★★★ */
 function getKeyboardMetrics(){
   const pad = 6;
@@ -1106,10 +1208,24 @@ function getKeyboardMetrics(){
   return {pad, G, topBarH, keyH, unitW, width: totalW, height: totalH};
 }
 
-/* ★ 缩放拖动条几何 */
+function updateKeyboardAnimation(){
+  if(virtualKeyboard.animProgress < virtualKeyboard.animTarget){
+    virtualKeyboard.animProgress = Math.min(virtualKeyboard.animTarget, virtualKeyboard.animProgress + KEYBOARD_ANIM_SPEED);
+  } else if(virtualKeyboard.animProgress > virtualKeyboard.animTarget){
+    virtualKeyboard.animProgress = Math.max(virtualKeyboard.animTarget, virtualKeyboard.animProgress - KEYBOARD_ANIM_SPEED);
+  }
+  if(virtualKeyboard.animProgress <= 0.001 && virtualKeyboard.animTarget === 0){
+    virtualKeyboard.animProgress = 0;
+    virtualKeyboard.visible = false;
+  }
+  const travel = Math.max(canvas.width, 320) - virtualKeyboard.x + 40;
+  const eased = easeOutCubic(virtualKeyboard.animProgress);
+  virtualKeyboard.animOffsetX = (1 - eased) * travel;
+}
+
 function getSliderRect(){
   const m = getKeyboardMetrics();
-  const kx = virtualKeyboard.x, ky = virtualKeyboard.y, kw = m.width;
+  const kx = virtualKeyboard.x + virtualKeyboard.animOffsetX, ky = virtualKeyboard.y, kw = m.width;
   const left = kx + 42;
   const right = kx + kw - 34;
   const w = Math.max(30, right - left);
@@ -1119,7 +1235,7 @@ function getSliderRect(){
 }
 function beginSliderDrag(mx, touchId){
   const m = getKeyboardMetrics();
-  const kx = virtualKeyboard.x, kw = m.width;
+  const kx = virtualKeyboard.x + virtualKeyboard.animOffsetX, kw = m.width;
   const left = kx + 42;
   const trackW = Math.max(30, (kx + kw - 34) - left);
   virtualKeyboard.sliderDragging = true;
@@ -1147,7 +1263,6 @@ function updateSliderFromX(mx){
   if(virtualKeyboard.y + m2.height > canvas.height - 4) virtualKeyboard.y = Math.max(0, canvas.height - 4 - m2.height);
 }
 
-/* ★ 计算按键在当前修饰键状态下的实际字符 */
 function getEffectiveKey(label){
   const mapping = KEY_MAP[label];
   if(!mapping) return label;
@@ -1161,7 +1276,6 @@ function getEffectiveKey(label){
   return mapping.key;
 }
 
-/* ★ 向 document 分发真实的键盘事件 */
 function dispatchVirtualKey(type, label, isRepeat){
   const mapping = KEY_MAP[label];
   if(!mapping) return;
@@ -1190,7 +1304,6 @@ function dispatchVirtualKey(type, label, isRepeat){
   document.dispatchEvent(ev);
 }
 
-/* ★ 开始按键自动重复 */
 function startKeyRepeat(label){
   stopKeyRepeat(label);
   const delay = setTimeout(() => {
@@ -1213,7 +1326,6 @@ function stopKeyRepeat(label){
   if(i){clearInterval(i);virtualKeyboard.repeatIntervals.delete(label);}
 }
 
-/* ★ 按下虚拟键 */
 function virtualKeyPress(label, touchId){
   if(virtualKeyboard.touchToKey.get(touchId) === label) return;
   const prevLabel = virtualKeyboard.touchToKey.get(touchId);
@@ -1221,7 +1333,6 @@ function virtualKeyPress(label, touchId){
   virtualKeyboard.touchToKey.set(touchId, label);
   virtualKeyboard.pressedLabels.add(label);
   const mapping = KEY_MAP[label];
-  /* Caps Lock 是切换 */
   if(mapping && mapping.isToggle){
     virtualKeyboard.capsLock = !virtualKeyboard.capsLock;
   }
@@ -1231,7 +1342,6 @@ function virtualKeyPress(label, touchId){
   }
 }
 
-/* ★ 松开虚拟键 */
 function virtualKeyRelease(touchId){
   const label = virtualKeyboard.touchToKey.get(touchId);
   if(!label) return;
@@ -1249,7 +1359,7 @@ function virtualKeyRelease(touchId){
 
 function findKeyAtPoint(mx, my){
   const m = getKeyboardMetrics();
-  const kx = virtualKeyboard.x, ky = virtualKeyboard.y;
+  const kx = virtualKeyboard.x + virtualKeyboard.animOffsetX, ky = virtualKeyboard.y;
   const kw = m.width;
   for(let r=0;r<KEY_ROWS.length;r++){
     const row = KEY_ROWS[r];
@@ -1274,12 +1384,13 @@ function openVirtualKeyboard(){
   virtualKeyboard.h = m.height;
   virtualKeyboard.x = Math.max(4, Math.min(canvas.width - m.width - 4, (canvas.width - m.width) / 2));
   virtualKeyboard.y = Math.max(4, canvas.height - m.height - 10);
+  virtualKeyboard.animTarget = 1;
 }
 function closeVirtualKeyboard(){
   for(const touchId of Array.from(virtualKeyboard.touchToKey.keys())){
     virtualKeyRelease(touchId);
   }
-  virtualKeyboard.visible = false;
+  virtualKeyboard.animTarget = 0;
   virtualKeyboard.dragging = false;
   virtualKeyboard.dragTouchId = null;
   virtualKeyboard.dragMouse = false;
@@ -1288,16 +1399,15 @@ function closeVirtualKeyboard(){
 
 function handleKeyboardTouchStart(mx, my, touchId){
   if(!virtualKeyboard.visible) return false;
+  if(virtualKeyboard.animTarget !== 1) return false;
   const m = getKeyboardMetrics();
-  const kx = virtualKeyboard.x, ky = virtualKeyboard.y;
+  const kx = virtualKeyboard.x + virtualKeyboard.animOffsetX, ky = virtualKeyboard.y;
   const kw = m.width, kh = m.height;
   if(mx < kx || mx > kx + kw || my < ky || my > ky + kh) return false;
-  /* 关闭按钮 */
   if(mx >= kx + kw - 30 && mx <= kx + kw - 4 && my >= ky + 2 && my <= ky + 22){
     closeVirtualKeyboard();
     return true;
   }
-  /* ★ 缩放拖动条 */
   if(my >= ky + 2 && my <= ky + m.topBarH - 2){
     const sr = getSliderRect();
     if(mx >= sr.x - 14 && mx <= sr.x + sr.w + 14){
@@ -1305,7 +1415,6 @@ function handleKeyboardTouchStart(mx, my, touchId){
       return true;
     }
   }
-  /* 顶部栏拖动 */
   if(my < ky + m.topBarH){
     virtualKeyboard.dragging = true;
     virtualKeyboard.dragOffsetX = mx - kx;
@@ -1313,7 +1422,6 @@ function handleKeyboardTouchStart(mx, my, touchId){
     virtualKeyboard.dragTouchId = touchId;
     return true;
   }
-  /* 按键 */
   const label = findKeyAtPoint(mx, my);
   if(label){
     virtualKeyPress(label, touchId);
@@ -1332,7 +1440,6 @@ function handleKeyboardTouchEnd(touchId){
   }
 }
 function handleKeyboardDrag(mx, my, touchId){
-  /* ★ 拖动条优先 */
   if(virtualKeyboard.sliderDragging){
     if(touchId !== null && virtualKeyboard.sliderTouchId !== touchId) return false;
     updateSliderFromX(mx);
@@ -1341,7 +1448,8 @@ function handleKeyboardDrag(mx, my, touchId){
   if(!virtualKeyboard.dragging) return false;
   if(virtualKeyboard.dragTouchId !== null && virtualKeyboard.dragTouchId !== touchId) return false;
   const m = getKeyboardMetrics();
-  virtualKeyboard.x = Math.max(0, Math.min(canvas.width - m.width, mx - virtualKeyboard.dragOffsetX));
+  const newX = mx - virtualKeyboard.dragOffsetX - virtualKeyboard.animOffsetX;
+  virtualKeyboard.x = Math.max(0, Math.min(canvas.width - m.width, newX));
   virtualKeyboard.y = Math.max(0, Math.min(canvas.height - m.height, my - virtualKeyboard.dragOffsetY));
   return true;
 }
@@ -1350,28 +1458,23 @@ function drawVirtualKeyboard(){
   if(!virtualKeyboard.visible) return;
   const m = getKeyboardMetrics();
   virtualKeyboard.w = m.width; virtualKeyboard.h = m.height;
-  const kx = virtualKeyboard.x, ky = virtualKeyboard.y;
+  const kx = virtualKeyboard.x + virtualKeyboard.animOffsetX, ky = virtualKeyboard.y;
   const kw = m.width, kh = m.height;
   ctx.save();
-  /* 背景阴影 */
   ctx.shadowColor='rgba(0,0,0,0.65)';
   ctx.shadowBlur=14; ctx.shadowOffsetY=5;
   ctx.fillStyle='rgba(25,25,45,0.97)';
   ctx.fillRect(kx, ky, kw, kh);
   ctx.shadowColor='transparent'; ctx.shadowBlur=0; ctx.shadowOffsetY=0;
-  /* 外框 */
   ctx.strokeStyle='#8a8aaa'; ctx.lineWidth=2;
   ctx.strokeRect(kx, ky, kw, kh);
-  /* 顶部栏 */
   ctx.fillStyle='rgba(70,70,100,0.98)';
   ctx.fillRect(kx, ky, kw, m.topBarH);
   ctx.strokeStyle='rgba(138,138,170,0.6)'; ctx.lineWidth=1;
   ctx.beginPath(); ctx.moveTo(kx, ky + m.topBarH); ctx.lineTo(kx + kw, ky + m.topBarH); ctx.stroke();
-  /* 标题 */
   ctx.fillStyle='#fff'; ctx.font='bold 13px '+FONT;
   ctx.textAlign='left'; ctx.textBaseline='middle';
   ctx.fillText('键盘', kx + 8, ky + m.topBarH / 2);
-  /* ★ 缩放拖动条 */
   const sr = getSliderRect();
   const tScale = (virtualKeyboard.scale - KEYBOARD_MIN_SCALE) / (KEYBOARD_MAX_SCALE - KEYBOARD_MIN_SCALE);
   ctx.fillStyle = 'rgba(12,12,26,0.95)';
@@ -1390,7 +1493,6 @@ function drawVirtualKeyboard(){
   ctx.strokeStyle = '#5a7ac0';
   ctx.lineWidth = 2;
   ctx.stroke();
-  /* 关闭按钮 */
   const closeX = kx + kw - 28, closeY = ky + 3, closeW = 24, closeH = m.topBarH - 6;
   ctx.fillStyle='#a04040';
   ctx.fillRect(closeX, closeY, closeW, closeH);
@@ -1399,7 +1501,6 @@ function drawVirtualKeyboard(){
   ctx.fillStyle='#fff'; ctx.font='bold 16px '+FONT;
   ctx.textAlign='center';
   ctx.fillText('×', closeX + closeW / 2, closeY + closeH / 2);
-  /* 按键 */
   for(let r = 0; r < KEY_ROWS.length; r++){
     const row = KEY_ROWS[r];
     let rowW = 0;
@@ -1421,7 +1522,6 @@ function drawVirtualKeyboard(){
                          || (isCtrl && (virtualKeyboard.pressedLabels.has('CtrlL') || virtualKeyboard.pressedLabels.has('CtrlR')))
                          || (isAlt && (virtualKeyboard.pressedLabels.has('AltL') || virtualKeyboard.pressedLabels.has('AltR')))
                          || (label === 'Caps' && virtualKeyboard.capsLock);
-      /* 颜色 */
       let bgColor = '#4a4a7a';
       if(label === 'Enter') bgColor = pressed ? '#5a9a5a' : '#3a7a3a';
       else if(label === 'Backspace') bgColor = pressed ? '#9a5a5a' : '#7a3a3a';
@@ -1432,7 +1532,6 @@ function drawVirtualKeyboard(){
       ctx.fillRect(cx, cy, w, m.keyH);
       ctx.strokeStyle = 'rgba(180,180,220,0.6)'; ctx.lineWidth = 1;
       ctx.strokeRect(cx, cy, w, m.keyH);
-      /* 标签文本 */
       let displayLabel = k.label || k.c;
       if(!k.label){
         if(/^[a-z]$/.test(k.c)){
@@ -1463,8 +1562,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Control')ctrlPressed=true;
   if(e.key==='F3'&&e.shiftKey&&keys['enter']){e.preventDefault();logVisible=!logVisible;return;}
   if(e.key==='F3'){e.preventDefault();return;}
-  /* ★ F4 切换虚拟键盘 */
-  if(e.key==='F4'){e.preventDefault();if(virtualKeyboard.visible){closeVirtualKeyboard();}else{openVirtualKeyboard();}return;}
+  if(e.key==='F4'){e.preventDefault();if(virtualKeyboard.animTarget===1){closeVirtualKeyboard();}else{openVirtualKeyboard();}return;}
   if((e.ctrlKey||e.metaKey)&&key==='w')return;
   if(gameState==='menu'||gameState==='saves'||gameState==='createWorld'){
     if((e.ctrlKey||e.metaKey)&&key==='v')return;
@@ -1497,7 +1595,7 @@ document.addEventListener('keydown',e=>{
   if(gameState==='playing'){
     if(document.getElementById('saveOverlay').style.display==='flex')return;
     if(e.key==='Escape'){
-      if(virtualKeyboard.visible){closeVirtualKeyboard();return;}
+      if(virtualKeyboard.animTarget===1){closeVirtualKeyboard();return;}
       if(showInventory||showCraftingTable||showFurnace||showChest){closeChest();cancelSplit();showInventory=false;showCraftingTable=false;showFurnace=false;return;}
       if(showInGameMenu){if(showOptionsMenu){showOptionsMenu=false;return;}showInGameMenu=false;return;}
       showInGameMenu=true;showOptionsMenu=false;return;
@@ -1787,6 +1885,11 @@ canvas.addEventListener('touchstart',e=>{
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
     /* ★ 虚拟键盘优先 */
     if(handleKeyboardTouchStart(mx,my,t.identifier)) continue;
+    /* ★ 选项菜单光圈大小拖动条 */
+    if(showOptionsMenu){
+      const logicalX = toOptionsLogicalX(mx);
+      if(handleOptionsSliderStart(logicalX, my, t.identifier)) continue;
+    }
     /* ★ 右边缘向左滑动检测 */
     if(!virtualKeyboard.visible&&mx>canvas.width-RIGHT_EDGE_SWIPE_ZONE){
       rightEdgeSwipe.active=true;
@@ -1832,6 +1935,11 @@ canvas.addEventListener('touchmove',e=>{
   for(const t of e.changedTouches){
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
+    /* ★ 选项光圈拖动条优先 */
+    if(optionsSliderDragging && optionsSliderTouchId === t.identifier){
+      updateOptionsSliderDrag(toOptionsLogicalX(mx));
+      continue;
+    }
     /* ★ 键盘拖动 / 拖动条 */
     if(handleKeyboardDrag(mx,my,t.identifier)) continue;
     /* ★ 右边缘滑动 */
@@ -1881,6 +1989,10 @@ canvas.addEventListener('touchend',e=>{
   for(const t of e.changedTouches){
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
+    /* ★ 选项光圈拖动条结束 */
+    if(optionsSliderDragging && optionsSliderTouchId === t.identifier){
+      endOptionsSliderDrag();
+    }
     /* ★ 键盘触摸结束（含拖动条） */
     handleKeyboardTouchEnd(t.identifier);
     if(rightEdgeSwipe.active&&rightEdgeSwipe.touchId===t.identifier){
@@ -1906,6 +2018,9 @@ canvas.addEventListener('touchcancel',e=>{
   for(const t of e.changedTouches){
     const r=touchRipples.get(t.identifier);
     if(r)r.fading=true;
+    if(optionsSliderDragging && optionsSliderTouchId === t.identifier){
+      endOptionsSliderDrag();
+    }
     handleKeyboardTouchEnd(t.identifier);
     if(rightEdgeSwipe.active&&rightEdgeSwipe.touchId===t.identifier){
       rightEdgeSwipe.active=false;rightEdgeSwipe.touchId=null;
@@ -1967,6 +2082,11 @@ function isButtonClick(mx,my){
 canvas.addEventListener('mousemove',e=>{
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  /* ★ 选项光圈拖动条优先 */
+  if(optionsSliderDragging && optionsSliderTouchId === 'mouse'){
+    updateOptionsSliderDrag(toOptionsLogicalX(mx));
+    return;
+  }
   /* ★ 键盘鼠标拖动 / 拖动条 */
   if(handleKeyboardDrag(mx,my,null)) return;
   /* ★ 鼠标滑动检测 */
@@ -2021,16 +2141,14 @@ canvas.addEventListener('mousedown',e=>{
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
   /* ★ 虚拟键盘优先 */
-  if(virtualKeyboard.visible){
+  if(virtualKeyboard.visible && virtualKeyboard.animTarget === 1){
     const m=getKeyboardMetrics();
-    const kx=virtualKeyboard.x,ky=virtualKeyboard.y,kw=m.width,kh=m.height;
+    const kx=virtualKeyboard.x + virtualKeyboard.animOffsetX, ky=virtualKeyboard.y, kw=m.width, kh=m.height;
     if(mx>=kx&&mx<=kx+kw&&my>=ky&&my<=ky+kh){
-      /* 关闭按钮 */
       if(mx>=kx+kw-30&&mx<=kx+kw-4&&my>=ky+2&&my<=ky+22){
         closeVirtualKeyboard();
         return;
       }
-      /* ★ 缩放拖动条 */
       if(my>=ky+2&&my<=ky+m.topBarH-2){
         const sr=getSliderRect();
         if(mx>=sr.x-14&&mx<=sr.x+sr.w+14){
@@ -2038,7 +2156,6 @@ canvas.addEventListener('mousedown',e=>{
           return;
         }
       }
-      /* 顶部栏拖动 */
       if(my<ky+m.topBarH){
         virtualKeyboard.dragging=true;
         virtualKeyboard.dragMouse=true;
@@ -2046,11 +2163,15 @@ canvas.addEventListener('mousedown',e=>{
         virtualKeyboard.dragOffsetY=my-ky;
         return;
       }
-      /* 按键 */
       const label=findKeyAtPoint(mx,my);
       if(label){virtualKeyPress(label,'mouse');}
       return;
     }
+  }
+  /* ★ 选项菜单光圈大小拖动条 */
+  if(showOptionsMenu){
+    const logicalX = toOptionsLogicalX(mx);
+    if(handleOptionsSliderStart(logicalX, my, 'mouse')) return;
   }
   /* ★ 右边缘鼠标滑动检测 */
   if(!virtualKeyboard.visible&&mx>canvas.width-RIGHT_EDGE_SWIPE_ZONE&&e.button===0){
@@ -2244,6 +2365,10 @@ canvas.addEventListener('mouseup',e=>{
   if(virtualKeyboard.sliderDragging && virtualKeyboard.sliderTouchId==='mouse'){
     endSliderDrag();
   }
+  /* ★ 选项光圈拖动条结束 */
+  if(optionsSliderDragging && optionsSliderTouchId==='mouse'){
+    endOptionsSliderDrag();
+  }
   /* 释放鼠标按下的键 */
   virtualKeyRelease('mouse');
   if(rightEdgeSwipe.mouseActive){
@@ -2295,7 +2420,6 @@ function updateMonsters(){
     const m=monsters[i];
     m.attackCooldown=Math.max(0,m.attackCooldown-1);
     if(m.hurtTimer>0)m.hurtTimer--;
-    /* ★ 只有僵尸会被阳光灼烧 */
     if(!isNight&&m.type==='zombie'){
       const col=Math.floor((m.x+m.w/2)/TILE);
       let exposed=true;
@@ -2873,7 +2997,7 @@ function drawTouchRipples(){
   if(showInGameMenu)return;
   for(const [id,t] of touchRipples){
     if(t.alpha<=0)continue;
-    const radius=28;
+    const radius = touchRippleSize;
     const lineWidth=2;
     ctx.save();
     ctx.globalAlpha=t.alpha;
@@ -2918,7 +3042,6 @@ function drawRecipeList(L,recipes,title,hint){
   ctx.fillStyle='rgba(255,255,255,0.6)';ctx.font='13px '+FONT;ctx.textAlign='center';ctx.textBaseline='bottom';
   ctx.fillText(hint,L.x+L.w/2,canvas.height-15);
 }
-/* ★ 功能方块界面只显示方块名称 */
 function drawInventoryUI(){
   const p=uiProgress.inventory;if(p<0.005)return;
   const e=easeOutCubic(p),o=(1-e)*(canvas.height*0.7);
@@ -3095,6 +3218,7 @@ function drawLog(){
     '门状态: '+doorStates.size,
     '虚拟键盘: '+(virtualKeyboard.visible?'开启':'关闭'),
     '键盘缩放: '+(virtualKeyboard.scale*100).toFixed(0)+'%',
+    '光圈大小: '+Math.round(touchRippleSize)+'px',
     '',
     '按 Shift+Enter+F3 关闭日志'];
   const w=320,h=logLines.length*lineHeight+padding*2;
@@ -3223,6 +3347,8 @@ function drawOptionsMenu(){
   const label='手机模式：'+(phoneMode?'是':'否');
   const pb={x:canvas.width/2-150,y:canvas.height*0.35,w:300,h:44,label,enabled:true};
   drawMenuButton(pb,true);
+  /* ★ 触动光圈大小拖动条 */
+  drawRippleSizeSlider();
   const bw=200,bh=44;
   DONE_BTN.x=(canvas.width-bw)/2;DONE_BTN.y=canvas.height*0.7;DONE_BTN.w=bw;DONE_BTN.h=bh;
   drawMenuButton({...DONE_BTN,label:'完成',enabled:true},true);
@@ -3261,6 +3387,8 @@ function drawInGameMenu(){
     const label='手机模式：'+(phoneMode?'是':'否');
     const pb={x:canvas.width/2-150,y:canvas.height*0.35,w:300,h:44,label,enabled:true};
     drawMenuButton(pb,true);
+    /* ★ 触动光圈大小拖动条 */
+    drawRippleSizeSlider();
     const bw=200,bh=44;
     DONE_BTN.x=(canvas.width-bw)/2;DONE_BTN.y=canvas.height*0.7;DONE_BTN.w=bw;DONE_BTN.h=bh;
     drawMenuButton({...DONE_BTN,label:'完成',enabled:true},true);
@@ -3293,13 +3421,13 @@ function gameLoop(){
   frameCount++;
   const now=Date.now();
   if(now-lastFpsTime>=1000){fps=frameCount;frameCount=0;lastFpsTime=now;}
+  updateKeyboardAnimation();
   if(isLoading){ctx.clearRect(0,0,canvas.width,canvas.height);drawLoadingScreen();requestAnimationFrame(gameLoop);return;}
   if(loadingAlpha>0){loadingAlpha-=LOADING_FADE_SPEED;if(loadingAlpha<0)loadingAlpha=0;}
   if(gameState!=='playing'&&menuSlide<1)menuSlide=Math.min(1,menuSlide+0.08);
   ctx.clearRect(0,0,canvas.width,canvas.height);
   if(gameState!=='playing'){
     drawMenuScreen();
-    /* ★ 菜单界面也显示虚拟键盘 */
     drawVirtualKeyboard();
     if(loadingAlpha>0){ctx.save();ctx.globalAlpha=loadingAlpha;drawLoadingScreen();ctx.restore();}
     requestAnimationFrame(gameLoop);return;
@@ -3334,7 +3462,6 @@ function gameLoop(){
   drawSplitBar();
   if(showInGameMenu)drawInGameMenu();
   drawLog();
-  /* ★ 虚拟键盘绘制在最上层 */
   drawVirtualKeyboard();
   if(loadingAlpha>0){ctx.save();ctx.globalAlpha=loadingAlpha;drawLoadingScreen();ctx.restore();}
   requestAnimationFrame(gameLoop);
