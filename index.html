@@ -43,7 +43,6 @@ const DAY_LENGTH=36000;
 const CACHE_KEY='mc2d_tex_cache_v4',CACHE_DURATION=24*60*60*1000;
 const ANIMAL_MAX=12,ANIMAL_SPAWN_INTERVAL=300,ANIMAL_SPAWN_RADIUS=24;
 const MONSTER_MAX=10,MONSTER_SPAWN_INTERVAL=400,MONSTER_SPAWN_RADIUS=32;
-/* ★ 攻击距离 5 格 */
 const ATTACK_RANGE=TILE*5;
 const UI_HUGE=999999999999;
 let gameState='loading',showInGameMenu=false,showOptionsMenu=false,showNameEditor=false;
@@ -289,7 +288,6 @@ const BOX_LERP=0.3;
 const fallingBlocks=[],animals=[],monsters=[],saplings=new Map();
 const lightMap=new Map();
 const LIGHT_EMISSION={[BLOCK.TORCH]:14,[BLOCK.LIT_FURNACE]:13};
-/* ★ 箱子从 OPAQUE_BLOCKS 中移除：光照可穿过箱子 */
 const OPAQUE_BLOCKS=new Set([BLOCK.GRASS,BLOCK.DIRT,BLOCK.STONE,BLOCK.LOG,BLOCK.LEAVES,BLOCK.PLANKS,BLOCK.COBBLE,BLOCK.CRAFTING,BLOCK.FURNACE,BLOCK.LIT_FURNACE,BLOCK.SAND,BLOCK.GRAVEL,BLOCK.COAL_ORE,BLOCK.IRON_ORE,BLOCK.GOLD_ORE,BLOCK.DIAMOND_ORE,BLOCK.BEDROCK,BLOCK.WOOL]);
 const MENU_BUTTONS={
   singleplayer:{x:0,y:0,w:400,h:44,label:'单人游戏',enabled:true},
@@ -575,7 +573,6 @@ function addItemToInventory(t,c){
   return r===0;
 }
 function setCraftMessage(m){craftMessage=m;craftMessageTimer=120;}
-/* ★ 背包与工作台都添加：4 线 → 1 羊毛 */
 const RECIPES={
   inventory:[
     {inputs:[{type:ITEM.BLOCK_LOG,count:1}],output:{type:ITEM.BLOCK_PLANKS,count:4},name:'1 原木 → 4 木板'},
@@ -1015,15 +1012,13 @@ function screenToWorld(mx,my){return {x: camera.x + mx, y: camera.y + my};}
 function isFunctionalBlock(b){
   return b===BLOCK.CRAFTING||b===BLOCK.FURNACE||b===BLOCK.LIT_FURNACE||b===BLOCK.BED||b===BLOCK.DOOR_LOWER||b===BLOCK.DOOR_UPPER||b===BLOCK.CHEST;
 }
+/* ★ 箱子不能被破坏 */
 function breakBlockAt(worldCol,worldRow){
   const block=getBlock(worldCol,worldRow);
   if(block===BLOCK.AIR||block===BLOCK.BEDROCK||block===BLOCK.DOOR_UPPER)return;
+  if(block===BLOCK.CHEST)return;
   const overlap=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
   if(overlap)return;
-  if(block===BLOCK.CHEST){
-    if(showChest&&openChestX===worldCol&&openChestY===worldRow)closeChest();
-    dropChestContents(worldCol,worldRow);
-  }
   setBlock(worldCol,worldRow,BLOCK.AIR);
   playBreakSound();
   if(block===BLOCK.LEAVES){
@@ -1052,7 +1047,6 @@ function interactFunctionalBlock(worldCol,worldRow){
     if(key2){const cur=doorStates.get(key2)===true;doorStates.set(key2,!cur);}
   }
 }
-/* ★ 判断玩家与目标的距离是否在攻击范围内 */
 function isInAttackRange(target){
   const px=player.x+player.w/2,py=player.y+player.h/2;
   const tx=target.x+target.w/2,ty=target.y+target.h/2;
@@ -1062,14 +1056,12 @@ function isInAttackRange(target){
 function phoneWorldDown(mx,my){
   const wp=screenToWorld(mx,my);
   const wx=wp.x, wy=wp.y;
-  /* ★ 攻击动物需 5 格内 */
   for(const a of animals){
     if(wx>=a.x&&wx<=a.x+a.w&&wy>=a.y&&wy<=a.y+a.h){
       if(!isInAttackRange(a))return;
       a.health-=4;playBreakSound();return;
     }
   }
-  /* ★ 攻击怪物需 5 格内 */
   for(const m of monsters){
     if(wx>=m.x&&wx<=m.x+m.w&&wy>=m.y&&wy<=m.y+m.h){
       if(!isInAttackRange(m))return;
@@ -1084,6 +1076,8 @@ function phoneWorldDown(mx,my){
     if(overlap)return;
     if(block===BLOCK.BEDROCK)return;
     if(block===BLOCK.DOOR_UPPER)return;
+    /* ★ 点击箱子总是打开，不破坏 */
+    if(block===BLOCK.CHEST){openChestAt(worldCol,worldRow);return;}
     if(isFunctionalBlock(block)){
       const touchYInTile=wy-worldRow*TILE;
       if(touchYInTile<TILE/2){breakBlockAt(worldCol,worldRow);}
@@ -1094,7 +1088,6 @@ function phoneWorldDown(mx,my){
   if(overlap)return;
   const item=inventory[selectedSlot];
   if(!item)return;
-  /* ★ 腐肉回 1 血 */
   if(item.type===ITEM.APPLE||item.type===ITEM.RAW_MUTTON||item.type===ITEM.COOKED_MUTTON||item.type===ITEM.RAW_CHICKEN||item.type===ITEM.COOKED_CHICKEN||item.type===ITEM.ROTTEN_FLESH){
     let heal=item.type===ITEM.APPLE?4:((item.type===ITEM.RAW_MUTTON||item.type===ITEM.RAW_CHICKEN)?2:6);
     if(item.type===ITEM.ROTTEN_FLESH)heal=1;
@@ -1546,20 +1539,22 @@ canvas.addEventListener('mousedown',e=>{
   const worldCol=Math.floor(mouseWorldX/TILE);
   const worldRow=Math.floor(mouseWorldY/TILE);
   if(e.button===0){
-    /* ★ 攻击动物需 5 格内 */
     for(const a of animals){
       if(mouseWorldX>=a.x&&mouseWorldX<=a.x+a.w&&mouseWorldY>=a.y&&mouseWorldY<=a.y+a.h){
         if(!isInAttackRange(a))return;
         a.health-=4;playBreakSound();return;
       }
     }
-    /* ★ 攻击怪物需 5 格内 */
     for(const m of monsters){
       if(mouseWorldX>=m.x&&mouseWorldX<=m.x+m.w&&mouseWorldY>=m.y&&mouseWorldY<=m.y+m.h){
         if(!isInAttackRange(m))return;
         m.health-=4;m.hurtTimer=10;playBreakSound();return;
       }
     }
+    /* ★ 左键点击箱子 = 打开箱子，不破坏 */
+    const blockAtMouse=getBlock(worldCol,worldRow);
+    const overlapBox=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
+    if(blockAtMouse===BLOCK.CHEST&&!overlapBox){openChestAt(worldCol,worldRow);return;}
     breakBlockAt(worldCol,worldRow);
   }else if(e.button===2){
     const block=getBlock(worldCol,worldRow);
@@ -1580,7 +1575,6 @@ canvas.addEventListener('mousedown',e=>{
     if(block===BLOCK.AIR&&!overlap){
       const item=inventory[selectedSlot];
       if(!item)return;
-      /* ★ 腐肉回 1 血 */
       if(item.type===ITEM.APPLE||item.type===ITEM.RAW_MUTTON||item.type===ITEM.COOKED_MUTTON||item.type===ITEM.RAW_CHICKEN||item.type===ITEM.COOKED_CHICKEN||item.type===ITEM.ROTTEN_FLESH){
         let heal=item.type===ITEM.APPLE?4:((item.type===ITEM.RAW_MUTTON||item.type===ITEM.RAW_CHICKEN)?2:6);
         if(item.type===ITEM.ROTTEN_FLESH)heal=1;
@@ -1642,7 +1636,6 @@ function spawnDrop(wc,wr,t,c){
   drops.push({x:wc*TILE+TILE/2,y:wr*TILE+TILE/2,vx:(Math.random()-0.5)*2.5,vy:-3-Math.random()*1.5,type:t,count:c||1,age:0,onGround:false,pickupDelay:0});
 }
 function spawnAnimal(type,x,y){animals.push({type,x,y,vx:0,vy:0,w:TILE,h:TILE,health:10,maxHealth:10,onGround:false,facing:1,wanderTimer:0,wanderDir:0,age:0});}
-/* ★ 恢复僵尸 */
 function spawnMonster(type,x,y){
   if(type==='zombie'){
     monsters.push({type,x,y,vx:0,vy:0,w:TILE*0.75,h:TILE*1.9,health:20,maxHealth:20,onGround:false,facing:1,attackCooldown:0,hurtTimer:0,burnTimer:0});
@@ -1708,7 +1701,6 @@ function updateMonsters(){
     }
   }
 }
-/* ★ 生成僵尸或蜘蛛 */
 function updateMonsterSpawning(){
   monsterSpawnTimer++;
   if(monsterSpawnTimer<MONSTER_SPAWN_INTERVAL)return;
@@ -2058,7 +2050,6 @@ function drawAnimals(){
     }
   }
 }
-/* ★ 僵尸和蜘蛛都绘制 */
 function drawMonsters(){
   for(const m of monsters){
     const sx=m.x-camera.x,sy=m.y-camera.y;
