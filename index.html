@@ -1024,16 +1024,6 @@ function breakBlockAt(worldCol,worldRow){
   }
   setBlock(worldCol,worldRow,BLOCK.AIR);
   playBreakSound();
-function dropChestContents(x,y){
-  const k=x+','+y;
-  const arr=chestData.get(k);
-  if(!arr)return;
-  for(let i=0;i<CHEST_SIZE;i++){
-    const it=arr[i];
-    if(it)spawnDrop(x,y,it.type,it.count);
-  }
-  chestData.delete(k);
-}
   if(block===BLOCK.LEAVES){
     if(Math.random()<0.25)spawnDrop(worldCol,worldRow,ITEM.SAPLING,1);
     if(Math.random()<0.10)spawnDrop(worldCol,worldRow,ITEM.STICK,1);
@@ -1045,6 +1035,17 @@ function dropChestContents(x,y){
     const di=BLOCK_TO_ITEM[block];
     if(di!==undefined&&di!==null)spawnDrop(worldCol,worldRow,di,1);
   }
+}
+/* ★ 破坏箱子时掉落箱子内的所有物品 */
+function dropChestContents(x,y){
+  const k=x+','+y;
+  const arr=chestData.get(k);
+  if(!arr)return;
+  for(let i=0;i<CHEST_SIZE;i++){
+    const it=arr[i];
+    if(it)spawnDrop(x,y,it.type,it.count);
+  }
+  chestData.delete(k);
 }
 function interactFunctionalBlock(worldCol,worldRow){
   const block=getBlock(worldCol,worldRow);
@@ -1643,19 +1644,22 @@ function spawnDrop(wc,wr,t,c){
   drops.push({x:wc*TILE+TILE/2,y:wr*TILE+TILE/2,vx:(Math.random()-0.5)*2.5,vy:-3-Math.random()*1.5,type:t,count:c||1,age:0,onGround:false,pickupDelay:0});
 }
 function spawnAnimal(type,x,y){animals.push({type,x,y,vx:0,vy:0,w:TILE,h:TILE,health:10,maxHealth:10,onGround:false,facing:1,wanderTimer:0,wanderDir:0,age:0});}
+/* ★ 僵尸高度改为正好 2 格（不拉伸） */
 function spawnMonster(type,x,y){
   if(type==='zombie'){
-    monsters.push({type,x,y,vx:0,vy:0,w:TILE*0.75,h:TILE*1.9,health:20,maxHealth:20,onGround:false,facing:1,attackCooldown:0,hurtTimer:0,burnTimer:0});
+    monsters.push({type,x,y,vx:0,vy:0,w:TILE*0.75,h:TILE*2,health:20,maxHealth:20,onGround:false,facing:1,attackCooldown:0,hurtTimer:0,burnTimer:0});
   }else if(type==='spider'){
     monsters.push({type,x,y,vx:0,vy:0,w:TILE*1.4,h:TILE*0.9,health:16,maxHealth:16,onGround:false,facing:1,attackCooldown:0,hurtTimer:0,burnTimer:0});
   }
 }
+/* ★ 怪物使用矩形碰撞，不再穿墙 */
 function updateMonsters(){
   for(let i=monsters.length-1;i>=0;i--){
     const m=monsters[i];
     m.attackCooldown=Math.max(0,m.attackCooldown-1);
     if(m.hurtTimer>0)m.hurtTimer--;
-    if(!isNight){
+    /* 白天阳光伤害 */
+    if(!isNight && m.type==='zombie'){
       const col=Math.floor((m.x+m.w/2)/TILE);
       let exposed=true;
       for(let row=Math.floor(m.y/TILE)-1;row>=0;row--){
@@ -1669,6 +1673,7 @@ function updateMonsters(){
         if(m.burnTimer>=60){m.burnTimer=0;m.health-=1;m.hurtTimer=10;}
       }else{m.burnTimer=0;}
     }else{m.burnTimer=0;}
+
     const dx=player.x-m.x,dy=player.y-m.y;
     const dist=Math.sqrt(dx*dx+dy*dy);
     let moveSpeed=m.type==='zombie'?0.5:0.8;
@@ -1676,19 +1681,24 @@ function updateMonsters(){
       m.vx=Math.sign(dx)*moveSpeed;
       m.facing=m.vx>0?1:-1;
     }else{m.vx=0;}
-    const oldX=m.x;m.x+=m.vx;
-    const col=Math.floor((m.x+m.w/2)/TILE),row=Math.floor((m.y+m.h-4)/TILE);
-    if(row>=0&&row<CHUNK_H){
-      const f=getBlock(col,row);
-      if(f!==BLOCK.AIR&&f!==BLOCK.GLASS&&f!==BLOCK.TORCH&&f!==BLOCK.LADDER&&f!==BLOCK.SAPLING&&f!==BLOCK.DOOR_LOWER&&f!==BLOCK.DOOR_UPPER&&f!==BLOCK.BED&&f!==BLOCK.CHEST){m.x=oldX;m.vx=0;}
+
+    /* ★ 水平移动：矩形碰撞 */
+    m.x+=m.vx;
+    let mblocks=getBlocksInRect(m.x,m.y,m.w,m.h);
+    for(const b of mblocks){
+      if(m.vx>0){m.x=b.col*TILE-m.w;}
+      else if(m.vx<0){m.x=b.col*TILE+TILE;}
     }
+
+    /* ★ 垂直移动：矩形碰撞 */
     m.vy=Math.min(m.vy+GRAVITY,12);m.y+=m.vy;
-    const gr=Math.floor((m.y+m.h)/TILE),gc=Math.floor((m.x+m.w/2)/TILE);
-    if(gr>=0&&gr<CHUNK_H){
-      const g=getBlock(gc,gr);
-      if(g!==BLOCK.AIR&&g!==BLOCK.GLASS&&g!==BLOCK.TORCH&&g!==BLOCK.LADDER&&g!==BLOCK.SAPLING&&g!==BLOCK.BED&&g!==BLOCK.CHEST){m.y=gr*TILE-m.h;m.vy=0;m.onGround=true;}
-      else m.onGround=false;
+    m.onGround=false;
+    mblocks=getBlocksInRect(m.x,m.y,m.w,m.h);
+    for(const b of mblocks){
+      if(m.vy>0){m.y=b.row*TILE-m.h;m.vy=0;m.onGround=true;}
+      else if(m.vy<0){m.y=b.row*TILE+TILE;m.vy=0;}
     }
+
     const attackRange=m.type==='zombie'?TILE*0.8:TILE*1.2;
     if(dist<attackRange&&m.attackCooldown<=0){
       const dmg=m.type==='zombie'?3:2;
@@ -1735,6 +1745,7 @@ function updateMonsterSpawning(){
     }
   }
 }
+/* ★ 动物使用矩形碰撞，不再穿墙 */
 function updateAnimals(){
   for(let i=animals.length-1;i>=0;i--){
     const a=animals[i];
@@ -1742,19 +1753,24 @@ function updateAnimals(){
     if(a.wanderTimer<=0){a.wanderTimer=60+Math.random()*120;a.wanderDir=Math.random()<0.5?-1:1;if(Math.random()<0.35)a.wanderDir=0;}
     a.vx=a.wanderDir*0.7;
     if(a.vx!==0)a.facing=a.vx>0?1:-1;
-    const oldX=a.x;a.x+=a.vx;
-    const col=Math.floor((a.x+a.w/2)/TILE),row=Math.floor((a.y+a.h-4)/TILE);
-    if(row>=0&&row<CHUNK_H){
-      const f=getBlock(col,row);
-      if(f!==BLOCK.AIR&&f!==BLOCK.GLASS&&f!==BLOCK.TORCH&&f!==BLOCK.LADDER&&f!==BLOCK.SAPLING&&f!==BLOCK.DOOR_LOWER&&f!==BLOCK.DOOR_UPPER&&f!==BLOCK.BED){a.x=oldX;a.wanderDir*=-1;}
+
+    /* ★ 水平移动：矩形碰撞 */
+    a.x+=a.vx;
+    let ablocks=getBlocksInRect(a.x,a.y,a.w,a.h);
+    for(const b of ablocks){
+      if(a.vx>0){a.x=b.col*TILE-a.w;a.wanderDir=-1;}
+      else if(a.vx<0){a.x=b.col*TILE+TILE;a.wanderDir=1;}
     }
+
+    /* ★ 垂直移动：矩形碰撞 */
     a.vy=Math.min(a.vy+GRAVITY,12);a.y+=a.vy;
-    const gr=Math.floor((a.y+a.h)/TILE),gc=Math.floor((a.x+a.w/2)/TILE);
-    if(gr>=0&&gr<CHUNK_H){
-      const g=getBlock(gc,gr);
-      if(g!==BLOCK.AIR&&g!==BLOCK.GLASS&&g!==BLOCK.TORCH&&g!==BLOCK.LADDER&&g!==BLOCK.SAPLING&&g!==BLOCK.BED){a.y=gr*TILE-a.h;a.vy=0;a.onGround=true;}
-      else a.onGround=false;
+    a.onGround=false;
+    ablocks=getBlocksInRect(a.x,a.y,a.w,a.h);
+    for(const b of ablocks){
+      if(a.vy>0){a.y=b.row*TILE-a.h;a.vy=0;a.onGround=true;}
+      else if(a.vy<0){a.y=b.row*TILE+TILE;a.vy=0;}
     }
+
     if(a.health<=0){
       if(a.type==='sheep'){
         spawnDrop(Math.floor(a.x/TILE),Math.floor(a.y/TILE),ITEM.RAW_MUTTON,1);
