@@ -71,6 +71,7 @@ let pressInfo=null;
 let splitMode=null;
 const SPLIT_MAX_MS=1000;
 
+/* ★ 触摸光圈（硬边细环 + 差值反色 + 跟随 + 渐隐） */
 const touchRipples=new Map();
 
 let lastLeftTapTime=0;
@@ -736,7 +737,6 @@ function finishDrag(mx,my){
     if(ai){
       const ti=ai.arr[ai.idx];
       if(ti&&ti.type===item.type){
-        /* 相同物品：融合 */
         const total=ti.count+item.count;
         if(total<=64){
           ti.count=total;
@@ -746,7 +746,6 @@ function finishDrag(mx,my){
           item.count=total-64;
         }
       }else{
-        /* 不同物品：交换 */
         ai.arr[ai.idx]=item;
         if(ti){
           if(src)src.arr[src.idx]=ti;
@@ -757,7 +756,6 @@ function finishDrag(mx,my){
     }
   }
   if(item){
-    /* 拖到有效格子外：扔到世界 */
     throwItemStackToWorld(item.type,item.count);
   }
   dragging=null;
@@ -834,7 +832,7 @@ function resetWorld(seed){
   camera.x=0;camera.y=0;
   selectorInitialized=false;boxInitialized=false;
   showInventory=false;showCraftingTable=false;showFurnace=false;showChest=false;
-  dragging=null;pressInfo=null;splitMode=null;
+  dragging=null;pressInfo=null;splitMode=null;touchRipples.clear();
   uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;uiProgress.chest=0;
   gameTime=0;dayLight=1;isNight=false;
   animalSpawnTimer=0;
@@ -876,7 +874,7 @@ function loadSaveCode(code){
   player.spawnX=player.x;player.spawnY=player.y;
   selectorInitialized=false;boxInitialized=false;
   showInventory=false;showCraftingTable=false;showFurnace=false;showChest=false;
-  dragging=null;pressInfo=null;splitMode=null;
+  dragging=null;pressInfo=null;splitMode=null;touchRipples.clear();
   uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;uiProgress.chest=0;
   gameState='playing';menuSlide=0;gameTime=0;dayLight=1;isNight=false;
   animalSpawnTimer=0;
@@ -1038,7 +1036,6 @@ function interactFunctionalBlock(worldCol,worldRow){
   else if(block===BLOCK.FURNACE||block===BLOCK.LIT_FURNACE){showFurnace=true;showInventory=false;showCraftingTable=false;closeChest();}
   else if(block===BLOCK.CHEST){openChestAt(worldCol,worldRow);}
   else if(block===BLOCK.BED){
-    /* ★ 睡觉不再回血，只重置时间与重生点 */
     gameTime=0;dayLight=1;isNight=false;
     player.spawnX=player.x;player.spawnY=player.y;
   }
@@ -1223,7 +1220,8 @@ canvas.addEventListener('touchstart',e=>{
   for(const t of e.changedTouches){
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
-    touchRipples.set(t.identifier,{x:mx,y:my,startTime:Date.now()});
+    /* ★ 生成硬边细环（跟随手指） */
+    touchRipples.set(t.identifier,{x:mx,y:my,startTime:Date.now(),alpha:1,fading:false});
     if(gameState==='playing'&&!showInGameMenu){
       const btnName=hitTestTouchButtons(mx,my);
       if(btnName){
@@ -1263,8 +1261,9 @@ canvas.addEventListener('touchmove',e=>{
   for(const t of e.changedTouches){
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
+    /* ★ 光圈跟随手指 */
     const r=touchRipples.get(t.identifier);
-    if(r){r.x=mx;r.y=my;}
+    if(r&&!r.fading){r.x=mx;r.y=my;}
     if(pressInfo&&pressInfo.touchId===t.identifier&&!dragging){
       const dx=mx-pressInfo.startX,dy=my-pressInfo.startY;
       if(dx*dx+dy*dy>64){
@@ -1299,6 +1298,9 @@ canvas.addEventListener('touchend',e=>{
   for(const t of e.changedTouches){
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
+    /* ★ 开始渐隐，不立即删除 */
+    const r=touchRipples.get(t.identifier);
+    if(r)r.fading=true;
     if(pressInfo&&pressInfo.touchId===t.identifier){
       clearTimeout(pressInfo.timer);
       if(pressInfo.ref.kind==='inv')selectedSlot=pressInfo.ref.index;
@@ -1311,7 +1313,6 @@ canvas.addEventListener('touchend',e=>{
       finishDrag(mx,my);
     }
     releaseTouchById(t.identifier);
-    touchRipples.delete(t.identifier);
   }
   if(Object.keys(activeTouchMap).length===0){releaseAllTouchButtons();}
 },{passive:false});
@@ -1319,11 +1320,12 @@ canvas.addEventListener('touchcancel',e=>{
   if(!phoneMode)return;
   e.preventDefault();
   for(const t of e.changedTouches){
+    const r=touchRipples.get(t.identifier);
+    if(r)r.fading=true;
     if(pressInfo&&pressInfo.touchId===t.identifier){clearTimeout(pressInfo.timer);pressInfo=null;}
     if(splitMode&&splitMode.touchId===t.identifier)cancelSplit();
     if(dragging&&dragging.touchId===t.identifier)finishDrag(dragging.x,dragging.y);
     releaseTouchById(t.identifier);
-    touchRipples.delete(t.identifier);
   }
   if(Object.keys(activeTouchMap).length===0){releaseAllTouchButtons();}
 },{passive:false});
@@ -1389,8 +1391,9 @@ canvas.addEventListener('mousemove',e=>{
     }
   }
   if(dragging){dragging.x=mx;dragging.y=my;}
+  /* ★ 鼠标光圈跟随鼠标移动 */
   const mr=touchRipples.get('mouse');
-  if(mr){mr.x=mx;mr.y=my;}
+  if(mr&&!mr.fading){mr.x=mx;mr.y=my;}
   if(gameState==='playing'&&!showInGameMenu&&!showInventory&&!showCraftingTable&&!showFurnace&&!showChest){
     canvas.style.cursor='crosshair';
   }else{
@@ -1415,7 +1418,7 @@ canvas.addEventListener('mousedown',e=>{
   e.preventDefault();
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
-  if(phoneMode&&gameState==='playing')touchRipples.set('mouse',{x:mx,y:my,startTime:Date.now()});
+  if(phoneMode&&gameState==='playing')touchRipples.set('mouse',{x:mx,y:my,startTime:Date.now(),alpha:1,fading:false});
   if(isButtonClick(mx,my))playBtnSound();
   if(phoneMode&&gameState==='playing'&&!showInGameMenu){
     const btnName=hitTestTouchButtons(mx,my);
@@ -1549,7 +1552,6 @@ canvas.addEventListener('mousedown',e=>{
       return;
     }
     if(block===BLOCK.BED){
-      /* ★ 睡觉不再回血，只重置时间与重生点 */
       gameTime=0;dayLight=1;isNight=false;
       player.spawnX=player.x;player.spawnY=player.y;
       return;
@@ -1582,7 +1584,8 @@ canvas.addEventListener('mousedown',e=>{
 canvas.addEventListener('mouseup',e=>{
   releaseAllTouchButtons();
   phoneActiveButton=null;
-  touchRipples.delete('mouse');
+  const mr=touchRipples.get('mouse');
+  if(mr)mr.fading=true;
   if(gameState!=='playing'||isLoading)return;
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
@@ -1599,8 +1602,19 @@ canvas.addEventListener('mouseup',e=>{
   if(dragging.touchId!==undefined)return;
   finishDrag(mx,my);
 });
-canvas.addEventListener('mouseleave',e=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');cancelDrag();cancelSplit();if(pressInfo){clearTimeout(pressInfo.timer);pressInfo=null;}});
-window.addEventListener('blur',()=>{releaseAllTouchButtons();phoneActiveButton=null;touchRipples.delete('mouse');for(const k in keys)keys[k]=false;cancelDrag();cancelSplit();if(pressInfo){clearTimeout(pressInfo.timer);pressInfo=null;}});
+canvas.addEventListener('mouseleave',e=>{
+  releaseAllTouchButtons();phoneActiveButton=null;
+  const mr=touchRipples.get('mouse');if(mr)mr.fading=true;
+  cancelDrag();cancelSplit();
+  if(pressInfo){clearTimeout(pressInfo.timer);pressInfo=null;}
+});
+window.addEventListener('blur',()=>{
+  releaseAllTouchButtons();phoneActiveButton=null;
+  for(const k in keys)keys[k]=false;
+  for(const r of touchRipples.values())r.fading=true;
+  cancelDrag();cancelSplit();
+  if(pressInfo){clearTimeout(pressInfo.timer);pressInfo=null;}
+});
 document.getElementById('saveConfirmBtn').addEventListener('click',()=>{allowClose=true;location.reload();});
 document.getElementById('saveCancelBtn').addEventListener('click',()=>{document.getElementById('saveOverlay').style.display='none';});
 function spawnDrop(wc,wr,t,c){
@@ -2081,25 +2095,22 @@ function drawItemTooltip(){
   ctx.fillText(name,tx+tw/2,ty+th/2);
   ctx.restore();
 }
+/* ★ 手机反色光圈：硬边细环，深色显白，浅色显黑 */
 function drawTouchRipples(){
   if(!phoneMode)return;
   if(gameState!=='playing')return;
   if(showInGameMenu)return;
   for(const [id,t] of touchRipples){
-    const r=22;
+    if(t.alpha<=0)continue;
+    const radius=28;
+    const lineWidth=2;
     ctx.save();
-    ctx.fillStyle='rgba(255,255,255,0.25)';
+    ctx.globalAlpha=t.alpha;
+    ctx.globalCompositeOperation='difference';
+    ctx.strokeStyle='#ffffff';
+    ctx.lineWidth=lineWidth;
     ctx.beginPath();
-    ctx.arc(t.x,t.y,r,0,Math.PI*2);
-    ctx.fill();
-    ctx.fillStyle='rgba(255,255,255,0.45)';
-    ctx.beginPath();
-    ctx.arc(t.x,t.y,r*0.55,0,Math.PI*2);
-    ctx.fill();
-    ctx.strokeStyle='rgba(255,255,255,0.55)';
-    ctx.lineWidth=2;
-    ctx.beginPath();
-    ctx.arc(t.x,t.y,r,0,Math.PI*2);
+    ctx.arc(t.x,t.y,radius,0,Math.PI*2);
     ctx.stroke();
     ctx.restore();
   }
@@ -2521,6 +2532,13 @@ function gameLoop(){
     const elapsed=Date.now()-splitMode.startTime;
     splitMode.progress=Math.min(100,elapsed/SPLIT_MAX_MS*100);
   }
+  /* ★ 光圈渐隐更新 */
+  for(const [id,r] of touchRipples){
+    if(r.fading){
+      r.alpha-=0.05;
+      if(r.alpha<=0)touchRipples.delete(id);
+    }
+  }
   uiProgress.inventory+=((showInventory?1:0)-uiProgress.inventory)*UI_ANIM_SPEED;
   uiProgress.crafting+=((showCraftingTable?1:0)-uiProgress.crafting)*UI_ANIM_SPEED;
   uiProgress.furnace+=((showFurnace?1:0)-uiProgress.furnace)*UI_ANIM_SPEED;
@@ -2537,6 +2555,7 @@ function gameLoop(){
   drawHUD();drawInventoryUI();drawCraftingTableUI();
   drawFurnaceUI();drawChestUI();drawCraftMessage();drawDragging();drawTouchControls();
   drawItemTooltip();
+  /* ★ 光圈最后绘制，覆盖全部画面，产生反色效果 */
   drawTouchRipples();
   drawSplitBar();
   if(showInGameMenu)drawInGameMenu();
