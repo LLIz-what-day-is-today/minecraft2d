@@ -1012,15 +1012,28 @@ function screenToWorld(mx,my){return {x: camera.x + mx, y: camera.y + my};}
 function isFunctionalBlock(b){
   return b===BLOCK.CRAFTING||b===BLOCK.FURNACE||b===BLOCK.LIT_FURNACE||b===BLOCK.BED||b===BLOCK.DOOR_LOWER||b===BLOCK.DOOR_UPPER||b===BLOCK.CHEST;
 }
-/* ★ 箱子不能被破坏 */
+/* ★ 箱子可以正常破坏 */
 function breakBlockAt(worldCol,worldRow){
   const block=getBlock(worldCol,worldRow);
   if(block===BLOCK.AIR||block===BLOCK.BEDROCK||block===BLOCK.DOOR_UPPER)return;
-  if(block===BLOCK.CHEST)return;
   const overlap=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
   if(overlap)return;
+  if(block===BLOCK.CHEST){
+    if(showChest&&openChestX===worldCol&&openChestY===worldRow)closeChest();
+    dropChestContents(worldCol,worldRow);
+  }
   setBlock(worldCol,worldRow,BLOCK.AIR);
   playBreakSound();
+function dropChestContents(x,y){
+  const k=x+','+y;
+  const arr=chestData.get(k);
+  if(!arr)return;
+  for(let i=0;i<CHEST_SIZE;i++){
+    const it=arr[i];
+    if(it)spawnDrop(x,y,it.type,it.count);
+  }
+  chestData.delete(k);
+}
   if(block===BLOCK.LEAVES){
     if(Math.random()<0.25)spawnDrop(worldCol,worldRow,ITEM.SAPLING,1);
     if(Math.random()<0.10)spawnDrop(worldCol,worldRow,ITEM.STICK,1);
@@ -1076,8 +1089,6 @@ function phoneWorldDown(mx,my){
     if(overlap)return;
     if(block===BLOCK.BEDROCK)return;
     if(block===BLOCK.DOOR_UPPER)return;
-    /* ★ 点击箱子总是打开，不破坏 */
-    if(block===BLOCK.CHEST){openChestAt(worldCol,worldRow);return;}
     if(isFunctionalBlock(block)){
       const touchYInTile=wy-worldRow*TILE;
       if(touchYInTile<TILE/2){breakBlockAt(worldCol,worldRow);}
@@ -1551,10 +1562,6 @@ canvas.addEventListener('mousedown',e=>{
         m.health-=4;m.hurtTimer=10;playBreakSound();return;
       }
     }
-    /* ★ 左键点击箱子 = 打开箱子，不破坏 */
-    const blockAtMouse=getBlock(worldCol,worldRow);
-    const overlapBox=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
-    if(blockAtMouse===BLOCK.CHEST&&!overlapBox){openChestAt(worldCol,worldRow);return;}
     breakBlockAt(worldCol,worldRow);
   }else if(e.button===2){
     const block=getBlock(worldCol,worldRow);
