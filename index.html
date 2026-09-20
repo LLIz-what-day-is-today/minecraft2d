@@ -361,7 +361,25 @@ function playHurtSound(){
 let lastTouchTime=0;
 
 const BLOCK={AIR:0,GRASS:1,DIRT:2,STONE:3,LOG:4,LEAVES:5,PLANKS:6,COBBLE:7,GLASS:8,CRAFTING:9,FURNACE:10,LIT_FURNACE:11,SAND:12,GRAVEL:13,COAL_ORE:14,IRON_ORE:15,GOLD_ORE:16,DIAMOND_ORE:17,BEDROCK:18,TORCH:19,DOOR_LOWER:20,DOOR_UPPER:21,LADDER:22,SAPLING:23,BED:24,WOOL:25,CHEST:26};
-const ITEM={BLOCK_GRASS:100,BLOCK_DIRT:101,BLOCK_STONE:102,BLOCK_LOG:103,BLOCK_LEAVES:104,BLOCK_PLANKS:105,BLOCK_COBBLE:106,BLOCK_GLASS:107,BLOCK_CRAFTING:108,BLOCK_FURNACE:109,BLOCK_SAND:110,BLOCK_GRAVEL:111,COAL:200,CHARCOAL:201,STONE_ITEM:202,RAW_IRON:300,RAW_GOLD:301,DIAMOND:302,STICK:400,TORCH:401,DOOR:402,LADDER:403,SAPLING:404,APPLE:405,BED:406,WOOL:407,RAW_MUTTON:500,COOKED_MUTTON:501,RAW_CHICKEN:502,COOKED_CHICKEN:503,BLOCK_CHEST:504,ROTTEN_FLESH:505,STRING:506,SPIDER_EYE:507};
+const ITEM={BLOCK_GRASS:100,BLOCK_DIRT:101,BLOCK_STONE:102,BLOCK_LOG:103,BLOCK_LEAVES:104,BLOCK_PLANKS:105,BLOCK_COBBLE:106,BLOCK_GLASS:107,BLOCK_CRAFTING:108,BLOCK_FURNACE:109,BLOCK_SAND:110,BLOCK_GRAVEL:111,COAL:200,CHARCOAL:201,STONE_ITEM:202,RAW_IRON:300,RAW_GOLD:301,DIAMOND:302,STICK:400,TORCH:401,DOOR:402,LADDER:403,SAPLING:404,APPLE:405,BED:406,WOOL:407,RAW_MUTTON:500,COOKED_MUTTON:501,RAW_CHICKEN:502,COOKED_CHICKEN:503,BLOCK_CHEST:504,ROTTEN_FLESH:505,STRING:506,SPIDER_EYE:507,
+  /* ★ 剑类物品 */
+  WOODEN_SWORD:600,STONE_SWORD:601,IRON_SWORD:602,GOLDEN_SWORD:603,DIAMOND_SWORD:604};
+
+/* ★ 剑的伤害值（Java版基础伤害） */
+const SWORD_DAMAGE = {
+  [ITEM.WOODEN_SWORD]: 4,
+  [ITEM.STONE_SWORD]: 5,
+  [ITEM.IRON_SWORD]: 6,
+  [ITEM.GOLDEN_SWORD]: 4,
+  [ITEM.DIAMOND_SWORD]: 7,
+};
+const SWORD_NAMES = {
+  [ITEM.WOODEN_SWORD]: '木剑',
+  [ITEM.STONE_SWORD]: '石剑',
+  [ITEM.IRON_SWORD]: '铁剑',
+  [ITEM.GOLDEN_SWORD]: '金剑',
+  [ITEM.DIAMOND_SWORD]: '钻石剑',
+};
 
 const ITEM_NAMES={
   [ITEM.BLOCK_GRASS]:'草方块',[ITEM.BLOCK_DIRT]:'泥土',[ITEM.BLOCK_STONE]:'石头',
@@ -374,7 +392,9 @@ const ITEM_NAMES={
   [ITEM.LADDER]:'梯子',[ITEM.SAPLING]:'橡树苗',[ITEM.APPLE]:'苹果',
   [ITEM.BED]:'床',[ITEM.WOOL]:'白色羊毛',[ITEM.RAW_MUTTON]:'生羊肉',
   [ITEM.COOKED_MUTTON]:'熟羊肉',[ITEM.RAW_CHICKEN]:'生鸡肉',[ITEM.COOKED_CHICKEN]:'熟鸡肉',
-  [ITEM.BLOCK_CHEST]:'箱子',[ITEM.ROTTEN_FLESH]:'腐肉',[ITEM.STRING]:'线',[ITEM.SPIDER_EYE]:'蜘蛛眼'};
+  [ITEM.BLOCK_CHEST]:'箱子',[ITEM.ROTTEN_FLESH]:'腐肉',[ITEM.STRING]:'线',[ITEM.SPIDER_EYE]:'蜘蛛眼',
+  [ITEM.WOODEN_SWORD]:'木剑',[ITEM.STONE_SWORD]:'石剑',[ITEM.IRON_SWORD]:'铁剑',
+  [ITEM.GOLDEN_SWORD]:'金剑',[ITEM.DIAMOND_SWORD]:'钻石剑'};
 
 const BLOCK_TO_ITEM={
   [BLOCK.GRASS]:ITEM.BLOCK_GRASS,[BLOCK.DIRT]:ITEM.BLOCK_DIRT,[BLOCK.STONE]:ITEM.BLOCK_COBBLE,
@@ -427,6 +447,7 @@ const TEXTURE_URLS={
   [BLOCK.DOOR_LOWER]:'https://pica.zhimg.com/80/v2-bc14cc78599675079907868f4b119fde_720w.webp',
   [BLOCK.DOOR_UPPER]:'https://pic3.zhimg.com/80/v2-214667676960cf01bf32c13c62d4435a_720w.webp',
   [BLOCK.BED]:'https://zh.minecraft.wiki/images/BlockSprite_red-bed.png'};
+/* ★ 物品纹理：剑类使用 wiki 上的物品贴图 */
 const SPECIAL_ITEM_URLS={
   [ITEM.STICK]:'https://zh.minecraft.wiki/images/Stick_JE1_BE1.png',
   [ITEM.APPLE]:'https://zh.minecraft.wiki/images/Apple_JE3_BE3.png?cc008',
@@ -436,7 +457,14 @@ const SPECIAL_ITEM_URLS={
   [ITEM.COOKED_CHICKEN]:'https://zh.minecraft.wiki/images/Cooked_Chicken_JE2_BE2.png',
   [ITEM.ROTTEN_FLESH]:'https://zh.minecraft.wiki/images/Rotten_Flesh_JE2_BE2.png?dc71e',
   [ITEM.STRING]:'https://zh.minecraft.wiki/images/Invicon_String.png?e7cbf',
-  [ITEM.SPIDER_EYE]:'https://zh.minecraft.wiki/images/Spider_Eye_JE2_BE2.png'};
+  [ITEM.SPIDER_EYE]:'https://zh.minecraft.wiki/images/Spider_Eye_JE2_BE2.png',
+  /* ★ 剑的材质（来自 zh.minecraft.wiki） */
+  [ITEM.WOODEN_SWORD]:'https://zh.minecraft.wiki/images/Wooden_Sword_JE2_BE2.png',
+  [ITEM.STONE_SWORD]:'https://zh.minecraft.wiki/images/Stone_Sword_JE2_BE2.png',
+  [ITEM.IRON_SWORD]:'https://zh.minecraft.wiki/images/Iron_Sword_JE2_BE2.png',
+  [ITEM.GOLDEN_SWORD]:'https://zh.minecraft.wiki/images/Golden_Sword_JE3_BE2.png',
+  [ITEM.DIAMOND_SWORD]:'https://zh.minecraft.wiki/images/Diamond_Sword_JE2_BE2.png',
+};
 const STEVE_URL='https://zh.minecraft.wiki/images/thumb/Steve_JE5.png/111px-Steve_JE5.png?0b84d';
 const HEART_URL='https://zh.minecraft.wiki/images/Heart_%28icon%29.png?16571';
 const LOGO_URL='https://zh.minecraft.wiki/images/Minecraft_logo_2.svg?22b32';
@@ -444,6 +472,7 @@ const LOADING_BG_URL='https://zh.minecraft.wiki/images/thumb/End_Poem_background
 const MENU_BG_URL=LOADING_BG_URL;
 const SHEEP_URL='https://zh.minecraft.wiki/images/thumb/White_Sheep_JE6.png/160px-White_Sheep_JE6.png?ccbd6';
 const CHICKEN_URL='https://zh.minecraft.wiki/images/thumb/Chicken_JE2_BE2.png/100px-Chicken_JE2_BE2.png?a9bbd';
+/* ★ 僵尸贴图：原图较宽，使用锁定纵横比缩放，只调整总大小 */
 const ZOMBIE_URL='https://zh.minecraft.wiki/images/thumb/Zombie_JE2_BE2.png/150px-Zombie_JE2_BE2.png?b8c7b';
 const SPIDER_URL='https://zh.minecraft.wiki/images/thumb/Spider_JE5_BE4.png/200px-Spider_JE5_BE4.png?6206b';
 const BTN_NORMAL_URL='https://zh.minecraft.wiki/images/thumb/Java_edition_button.png/150px-Java_edition_button.png?f130c';
@@ -561,7 +590,8 @@ function createItemIcon(itemType){
   return c;
 }
 function buildItemIcons(){
-  const items=[ITEM.BLOCK_GRASS,ITEM.BLOCK_DIRT,ITEM.BLOCK_STONE,ITEM.BLOCK_LOG,ITEM.BLOCK_LEAVES,ITEM.BLOCK_PLANKS,ITEM.BLOCK_COBBLE,ITEM.BLOCK_GLASS,ITEM.BLOCK_CRAFTING,ITEM.BLOCK_FURNACE,ITEM.BLOCK_SAND,ITEM.BLOCK_GRAVEL,ITEM.COAL,ITEM.CHARCOAL,ITEM.STONE_ITEM,ITEM.RAW_IRON,ITEM.RAW_GOLD,ITEM.DIAMOND,ITEM.STICK,ITEM.TORCH,ITEM.DOOR,ITEM.LADDER,ITEM.SAPLING,ITEM.APPLE,ITEM.BED,ITEM.WOOL,ITEM.BLOCK_CHEST,ITEM.RAW_MUTTON,ITEM.COOKED_MUTTON,ITEM.RAW_CHICKEN,ITEM.COOKED_CHICKEN,ITEM.ROTTEN_FLESH,ITEM.STRING,ITEM.SPIDER_EYE];
+  const items=[ITEM.BLOCK_GRASS,ITEM.BLOCK_DIRT,ITEM.BLOCK_STONE,ITEM.BLOCK_LOG,ITEM.BLOCK_LEAVES,ITEM.BLOCK_PLANKS,ITEM.BLOCK_COBBLE,ITEM.BLOCK_GLASS,ITEM.BLOCK_CRAFTING,ITEM.BLOCK_FURNACE,ITEM.BLOCK_SAND,ITEM.BLOCK_GRAVEL,ITEM.COAL,ITEM.CHARCOAL,ITEM.STONE_ITEM,ITEM.RAW_IRON,ITEM.RAW_GOLD,ITEM.DIAMOND,ITEM.STICK,ITEM.TORCH,ITEM.DOOR,ITEM.LADDER,ITEM.SAPLING,ITEM.APPLE,ITEM.BED,ITEM.WOOL,ITEM.BLOCK_CHEST,ITEM.RAW_MUTTON,ITEM.COOKED_MUTTON,ITEM.RAW_CHICKEN,ITEM.COOKED_CHICKEN,ITEM.ROTTEN_FLESH,ITEM.STRING,ITEM.SPIDER_EYE,
+    ITEM.WOODEN_SWORD,ITEM.STONE_SWORD,ITEM.IRON_SWORD,ITEM.GOLDEN_SWORD,ITEM.DIAMOND_SWORD];
   items.forEach(item=>{if(!itemIconCache[item])itemIconCache[item]=createItemIcon(item);});
 }
 function loadTextures(callback){
@@ -593,7 +623,18 @@ function loadTextures(callback){
   });
   Object.keys(SPECIAL_ITEM_URLS).forEach(it=>{
     const img=new Image();img.crossOrigin='anonymous';
-    img.onload=function(){const c=document.createElement('canvas');c.width=32;c.height=32;const cx=c.getContext('2d');cx.imageSmoothingEnabled=false;cx.drawImage(img,0,0,32,32);itemIconCache[it]=c;loaded++;downloadProgress=loaded;checkDone();};
+    img.onload=function(){
+      const c=document.createElement('canvas');c.width=32;c.height=32;
+      const cx=c.getContext('2d');cx.imageSmoothingEnabled=false;
+      /* ★ 剑类贴图保持原始比例，居中绘制 */
+      const iw=img.naturalWidth,ih=img.naturalHeight;
+      if(iw>0&&ih>0){
+        const s=Math.min(32/iw,32/ih);
+        const dw=iw*s,dh=ih*s;
+        cx.drawImage(img,(32-dw)/2,(32-dh)/2,dw,dh);
+      }
+      itemIconCache[it]=c;loaded++;downloadProgress=loaded;checkDone();
+    };
     img.onerror=function(){loaded++;downloadProgress=loaded;checkDone();};
     img.src=SPECIAL_ITEM_URLS[it];
   });
@@ -604,6 +645,7 @@ function loadTextures(callback){
   loadOne(i=>{loadingBgImage=i;menuBgImage=i;}).src=LOADING_BG_URL;
   loadOne(i=>{sheepImage=i;}).src=SHEEP_URL;
   loadOne(i=>{chickenImage=i;}).src=CHICKEN_URL;
+  /* ★ 僵尸贴图：只调整总大小，保持纵横比 */
   loadOne(i=>{zombieImage=i;}).src=ZOMBIE_URL;
   loadOne(i=>{spiderImage=i;}).src=SPIDER_URL;
   loadOne(i=>{btnNormal=i;}).src=BTN_NORMAL_URL;
@@ -767,7 +809,13 @@ const RECIPES={
     {inputs:[{type:ITEM.BLOCK_PLANKS,count:6}],output:{type:ITEM.DOOR,count:3},name:'6 木板 → 3 门'},
     {inputs:[{type:ITEM.STICK,count:7}],output:{type:ITEM.LADDER,count:3},name:'7 木棍 → 3 梯子'},
     {inputs:[{type:ITEM.WOOL,count:3},{type:ITEM.BLOCK_PLANKS,count:3}],output:{type:ITEM.BED,count:1},name:'3 羊毛 + 3 木板 → 1 床'},
-    {inputs:[{type:ITEM.STICK,count:1},{type:ITEM.COAL,count:1}],output:{type:ITEM.TORCH,count:3},name:'1 木棍 + 1 煤炭 → 3 火把'}],
+    {inputs:[{type:ITEM.STICK,count:1},{type:ITEM.COAL,count:1}],output:{type:ITEM.TORCH,count:3},name:'1 木棍 + 1 煤炭 → 3 火把'},
+    /* ★ 剑的合成配方 */
+    {inputs:[{type:ITEM.BLOCK_PLANKS,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.WOODEN_SWORD,count:1},name:'2 木板 + 1 木棍 → 1 木剑'},
+    {inputs:[{type:ITEM.BLOCK_COBBLE,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.STONE_SWORD,count:1},name:'2 圆石 + 1 木棍 → 1 石剑'},
+    {inputs:[{type:ITEM.RAW_IRON,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.IRON_SWORD,count:1},name:'2 粗铁 + 1 木棍 → 1 铁剑'},
+    {inputs:[{type:ITEM.RAW_GOLD,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.GOLDEN_SWORD,count:1},name:'2 粗金 + 1 木棍 → 1 金剑'},
+    {inputs:[{type:ITEM.DIAMOND,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.DIAMOND_SWORD,count:1},name:'2 钻石 + 1 木棍 → 1 钻石剑'}],
   furnace:[
     {inputs:[{type:ITEM.BLOCK_COBBLE,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.STONE_ITEM,count:8},name:'8 原石 + 1 煤炭 → 8 石头'},
     {inputs:[{type:ITEM.BLOCK_LOG,count:5}],output:{type:ITEM.COAL,count:3},name:'5 原木 → 3 煤炭'},
@@ -1147,7 +1195,6 @@ function handleOptionsSliderStart(mx, my, touchId){
   }
   return false;
 }
-/* 把屏幕坐标转换为选项菜单逻辑坐标（菜单有滑入偏移） */
 function toOptionsLogicalX(mx){
   if(gameState === 'playing') return mx;
   const ease = easeOutCubic(menuSlide);
@@ -1155,24 +1202,19 @@ function toOptionsLogicalX(mx){
 }
 function drawRippleSizeSlider(){
   const r = getRippleSliderRect();
-  /* 标题 */
   ctx.fillStyle = '#fff';
   ctx.font = '16px ' + FONT;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
   ctx.fillText('触动光圈大小：' + Math.round(touchRippleSize) + ' px', canvas.width / 2, r.trackY - 14);
-  /* 轨道背景 */
   ctx.fillStyle = 'rgba(30,30,50,0.95)';
   ctx.fillRect(r.trackX, r.trackY, r.trackW, r.trackH);
-  /* 进度 */
   const t = (touchRippleSize - RIPPLE_SIZE_MIN) / (RIPPLE_SIZE_MAX - RIPPLE_SIZE_MIN);
   ctx.fillStyle = 'rgba(90,140,220,0.9)';
   ctx.fillRect(r.trackX, r.trackY, r.trackW * t, r.trackH);
-  /* 边框 */
   ctx.strokeStyle = 'rgba(160,160,200,0.85)';
   ctx.lineWidth = 1;
   ctx.strokeRect(r.trackX + 0.5, r.trackY + 0.5, r.trackW - 1, r.trackH - 1);
-  /* 滑块 */
   const hx = r.trackX + r.trackW * t;
   const hy = r.trackY + r.trackH / 2;
   ctx.beginPath();
@@ -1182,7 +1224,6 @@ function drawRippleSizeSlider(){
   ctx.strokeStyle = '#5a7ac0';
   ctx.lineWidth = 2;
   ctx.stroke();
-  /* 左右端点标记 */
   ctx.fillStyle = 'rgba(255,255,255,0.4)';
   ctx.font = '11px ' + FONT;
   ctx.textAlign = 'center';
@@ -1701,19 +1742,26 @@ function isInAttackRange(target){
   const dx=px-tx,dy=py-ty;
   return (dx*dx+dy*dy)<=ATTACK_RANGE*ATTACK_RANGE;
 }
+/* ★ 获取当前手持物品的攻击伤害 */
+function getSelectedAttackDamage(){
+  const item=inventory[selectedSlot];
+  if(!item)return 1; /* 空手伤害 */
+  if(SWORD_DAMAGE[item.type]!==undefined)return SWORD_DAMAGE[item.type];
+  return 1;
+}
 function phoneWorldDown(mx,my){
   const wp=screenToWorld(mx,my);
   const wx=wp.x, wy=wp.y;
   for(const a of animals){
     if(wx>=a.x&&wx<=a.x+a.w&&wy>=a.y&&wy<=a.y+a.h){
       if(!isInAttackRange(a))return;
-      a.health-=4;playBreakSound();return;
+      a.health-=getSelectedAttackDamage();playBreakSound();return;
     }
   }
   for(const m of monsters){
     if(wx>=m.x&&wx<=m.x+m.w&&wy>=m.y&&wy<=m.y+m.h){
       if(!isInAttackRange(m))return;
-      m.health-=4;m.hurtTimer=10;playBreakSound();return;
+      m.health-=getSelectedAttackDamage();m.hurtTimer=10;playBreakSound();return;
     }
   }
   const worldCol=Math.floor(wx/TILE);
@@ -1883,14 +1931,11 @@ canvas.addEventListener('touchstart',e=>{
   for(const t of e.changedTouches){
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
-    /* ★ 虚拟键盘优先 */
     if(handleKeyboardTouchStart(mx,my,t.identifier)) continue;
-    /* ★ 选项菜单光圈大小拖动条 */
     if(showOptionsMenu){
       const logicalX = toOptionsLogicalX(mx);
       if(handleOptionsSliderStart(logicalX, my, t.identifier)) continue;
     }
-    /* ★ 右边缘向左滑动检测 */
     if(!virtualKeyboard.visible&&mx>canvas.width-RIGHT_EDGE_SWIPE_ZONE){
       rightEdgeSwipe.active=true;
       rightEdgeSwipe.touchId=t.identifier;
@@ -1935,14 +1980,11 @@ canvas.addEventListener('touchmove',e=>{
   for(const t of e.changedTouches){
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
-    /* ★ 选项光圈拖动条优先 */
     if(optionsSliderDragging && optionsSliderTouchId === t.identifier){
       updateOptionsSliderDrag(toOptionsLogicalX(mx));
       continue;
     }
-    /* ★ 键盘拖动 / 拖动条 */
     if(handleKeyboardDrag(mx,my,t.identifier)) continue;
-    /* ★ 右边缘滑动 */
     if(rightEdgeSwipe.active&&rightEdgeSwipe.touchId===t.identifier){
       const dx=mx-rightEdgeSwipe.startX;
       const dy=Math.abs(my-rightEdgeSwipe.startY);
@@ -1989,11 +2031,9 @@ canvas.addEventListener('touchend',e=>{
   for(const t of e.changedTouches){
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
-    /* ★ 选项光圈拖动条结束 */
     if(optionsSliderDragging && optionsSliderTouchId === t.identifier){
       endOptionsSliderDrag();
     }
-    /* ★ 键盘触摸结束（含拖动条） */
     handleKeyboardTouchEnd(t.identifier);
     if(rightEdgeSwipe.active&&rightEdgeSwipe.touchId===t.identifier){
       rightEdgeSwipe.active=false;
@@ -2082,14 +2122,11 @@ function isButtonClick(mx,my){
 canvas.addEventListener('mousemove',e=>{
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
-  /* ★ 选项光圈拖动条优先 */
   if(optionsSliderDragging && optionsSliderTouchId === 'mouse'){
     updateOptionsSliderDrag(toOptionsLogicalX(mx));
     return;
   }
-  /* ★ 键盘鼠标拖动 / 拖动条 */
   if(handleKeyboardDrag(mx,my,null)) return;
-  /* ★ 鼠标滑动检测 */
   if(rightEdgeSwipe.mouseActive&&rightEdgeSwipe.active){
     const dx=mx-rightEdgeSwipe.startX;
     const dy=Math.abs(my-rightEdgeSwipe.startY);
@@ -2140,7 +2177,6 @@ canvas.addEventListener('mousedown',e=>{
   e.preventDefault();
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
-  /* ★ 虚拟键盘优先 */
   if(virtualKeyboard.visible && virtualKeyboard.animTarget === 1){
     const m=getKeyboardMetrics();
     const kx=virtualKeyboard.x + virtualKeyboard.animOffsetX, ky=virtualKeyboard.y, kw=m.width, kh=m.height;
@@ -2168,12 +2204,10 @@ canvas.addEventListener('mousedown',e=>{
       return;
     }
   }
-  /* ★ 选项菜单光圈大小拖动条 */
   if(showOptionsMenu){
     const logicalX = toOptionsLogicalX(mx);
     if(handleOptionsSliderStart(logicalX, my, 'mouse')) return;
   }
-  /* ★ 右边缘鼠标滑动检测 */
   if(!virtualKeyboard.visible&&mx>canvas.width-RIGHT_EDGE_SWIPE_ZONE&&e.button===0){
     rightEdgeSwipe.active=true;
     rightEdgeSwipe.mouseActive=true;
@@ -2299,13 +2333,13 @@ canvas.addEventListener('mousedown',e=>{
     for(const a of animals){
       if(mouseWorldX>=a.x&&mouseWorldX<=a.x+a.w&&mouseWorldY>=a.y&&mouseWorldY<=a.y+a.h){
         if(!isInAttackRange(a))return;
-        a.health-=4;playBreakSound();return;
+        a.health-=getSelectedAttackDamage();playBreakSound();return;
       }
     }
     for(const m of monsters){
       if(mouseWorldX>=m.x&&mouseWorldX<=m.x+m.w&&mouseWorldY>=m.y&&mouseWorldY<=m.y+m.h){
         if(!isInAttackRange(m))return;
-        m.health-=4;m.hurtTimer=10;playBreakSound();return;
+        m.health-=getSelectedAttackDamage();m.hurtTimer=10;playBreakSound();return;
       }
     }
     breakBlockAt(worldCol,worldRow);
@@ -2356,20 +2390,16 @@ canvas.addEventListener('mouseup',e=>{
   phoneActiveButton=null;
   const mr=touchRipples.get('mouse');
   if(mr)mr.fading=true;
-  /* ★ 键盘鼠标拖动结束 */
   if(virtualKeyboard.dragMouse){
     virtualKeyboard.dragging=false;
     virtualKeyboard.dragMouse=false;
   }
-  /* ★ 拖动条结束 */
   if(virtualKeyboard.sliderDragging && virtualKeyboard.sliderTouchId==='mouse'){
     endSliderDrag();
   }
-  /* ★ 选项光圈拖动条结束 */
   if(optionsSliderDragging && optionsSliderTouchId==='mouse'){
     endOptionsSliderDrag();
   }
-  /* 释放鼠标按下的键 */
   virtualKeyRelease('mouse');
   if(rightEdgeSwipe.mouseActive){
     rightEdgeSwipe.active=false;
@@ -2836,14 +2866,32 @@ function drawMonsters(){
     if(img&&img.complete){
       ctx.save();ctx.imageSmoothingEnabled=false;
       if(m.hurtTimer>0)ctx.globalAlpha=0.6;
-      if(m.facing>0){ctx.translate(sx+m.w,sy);ctx.scale(-1,1);ctx.drawImage(img,0,0,m.w,m.h);}
-      else ctx.drawImage(img,sx,sy,m.w,m.h);
+      /* ★ 僵尸贴图锁定纵横比：按目标总大小缩放，保持原始比例 */
+      if(m.type==='zombie'){
+        const iw=img.naturalWidth||1,ih=img.naturalHeight||1;
+        const s=Math.min(m.w/iw,m.h/ih);
+        const dw=iw*s,dh=ih*s;
+        const dx=sx+(m.w-dw)/2,dy=sy+(m.h-dh)/2;
+        if(m.facing>0){ctx.translate(dx+dw,dy);ctx.scale(-1,1);ctx.drawImage(img,0,0,dw,dh);}
+        else ctx.drawImage(img,dx,dy,dw,dh);
+      }else{
+        if(m.facing>0){ctx.translate(sx+m.w,sy);ctx.scale(-1,1);ctx.drawImage(img,0,0,m.w,m.h);}
+        else ctx.drawImage(img,sx,sy,m.w,m.h);
+      }
       ctx.restore();
     }else{
       ctx.save();
       if(m.type==='zombie'){ctx.fillStyle='#3a7a3a';ctx.fillRect(sx,sy,m.w,m.h);}
       else{ctx.fillStyle='#4a2a2a';ctx.fillRect(sx,sy,m.w,m.h);}
       ctx.restore();
+    }
+    /* ★ 生物血量显示 */
+    if(m.health<m.maxHealth){
+      const bw=m.w,bh=4,bx=sx,by=sy-8;
+      ctx.fillStyle='rgba(0,0,0,0.6)';
+      ctx.fillRect(bx-1,by-1,bw+2,bh+2);
+      ctx.fillStyle=m.type==='zombie'?'#4caf50':'#c62828';
+      ctx.fillRect(bx,by,bw*(m.health/m.maxHealth),bh);
     }
   }
 }
@@ -2865,6 +2913,16 @@ function drawPlayer(){
     ctx.fillStyle='#c99a6c';ctx.fillRect(sx+pw*0.15,drawY,pw*0.7,ph*0.3);
     ctx.fillStyle='#2d8a4e';ctx.fillRect(sx+pw*0.1,drawY+ph*0.3,pw*0.8,ph*0.4);
     ctx.fillStyle='#3a5a8a';ctx.fillRect(sx+pw*0.15,drawY+ph*0.7,pw*0.3,ph*0.3);ctx.fillRect(sx+pw*0.55,drawY+ph*0.7,pw*0.3,ph*0.3);
+  }
+  /* ★ 玩家手中剑的绘制（可选，简单显示手持物品图标） */
+  const heldItem=inventory[selectedSlot];
+  if(heldItem&&itemIconCache[heldItem.type]){
+    const ix=sx+player.w/2+player.facing*10, iy=sy+player.h*0.4;
+    ctx.save();
+    ctx.translate(ix,iy);
+    if(player.facing<0)ctx.scale(-1,1);
+    ctx.drawImage(itemIconCache[heldItem.type],-8,-8,16,16);
+    ctx.restore();
   }
 }
 function drawHealth(){
@@ -3347,7 +3405,6 @@ function drawOptionsMenu(){
   const label='手机模式：'+(phoneMode?'是':'否');
   const pb={x:canvas.width/2-150,y:canvas.height*0.35,w:300,h:44,label,enabled:true};
   drawMenuButton(pb,true);
-  /* ★ 触动光圈大小拖动条 */
   drawRippleSizeSlider();
   const bw=200,bh=44;
   DONE_BTN.x=(canvas.width-bw)/2;DONE_BTN.y=canvas.height*0.7;DONE_BTN.w=bw;DONE_BTN.h=bh;
@@ -3387,7 +3444,6 @@ function drawInGameMenu(){
     const label='手机模式：'+(phoneMode?'是':'否');
     const pb={x:canvas.width/2-150,y:canvas.height*0.35,w:300,h:44,label,enabled:true};
     drawMenuButton(pb,true);
-    /* ★ 触动光圈大小拖动条 */
     drawRippleSizeSlider();
     const bw=200,bh=44;
     DONE_BTN.x=(canvas.width-bw)/2;DONE_BTN.y=canvas.height*0.7;DONE_BTN.w=bw;DONE_BTN.h=bh;
