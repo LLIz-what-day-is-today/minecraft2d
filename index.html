@@ -195,7 +195,6 @@ const ITEM={
   DIAMOND_HELMET:740,DIAMOND_CHESTPLATE:741,DIAMOND_LEGGINGS:742,DIAMOND_BOOTS:743
 };
 
-/* 盔甲颜色（仅用于玩家身上渲染） */
 const ARMOR_COLORS={
   leather:{main:'#8b5a2b',dark:'#5a3a1a'},
   chainmail:{main:'#a8a8a8',dark:'#606060'},
@@ -271,7 +270,6 @@ const TEXTURE_URLS={
   [BLOCK.BED]:'https://zh.minecraft.wiki/images/BlockSprite_red-bed.png'
 };
 
-/* 物品纹理（盔甲：金头盔/胸甲/护腿/靴子已使用稳定缩略图 URL） */
 const SPECIAL_ITEM_URLS={
   [ITEM.STICK]:'https://zh.minecraft.wiki/images/Stick_JE1_BE1.png',
   [ITEM.APPLE]:'https://zh.minecraft.wiki/images/Apple_JE3_BE3.png',
@@ -719,7 +717,7 @@ function getChestSlotIndex(mx,my){
 function isInventoryBarVisible(){return !inventoryBarHidden||showChest;}
 function getSlotRefAtPoint(mx,my){
   const ai=getArmorSlotAtPoint(mx,my);
-  if(ai>=0)return{kind:'armor',index:ai};
+  if(ai>=0&&!inventoryBarHidden)return{kind:'armor',index:ai};
   if(showChest){const ci=getChestSlotIndex(mx,my);if(ci>=0)return{kind:'chest',index:ci};}
   if(isInventoryBarVisible()){const ii=getSlotAtPoint(mx,my);if(ii>=0)return{kind:'inv',index:ii};}
   return null;
@@ -1466,7 +1464,7 @@ function handleTouchGame(mx,my){
     closeChest();
     return;
   }
-  {
+  if(!inventoryBarHidden){
     const bar=getInventoryBarRect();
     if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
       const slot=getSlotAtPoint(mx,my);
@@ -2334,7 +2332,6 @@ function drawMonsters(){
     }
   }
 }
-/* 玩家身上渲染盔甲（按材质颜色叠加） */
 function drawPlayerArmor(sx,sy,drawW,drawH){
   const slots=[
     {item:armorInventory[3],y0:0.82,y1:1.00,x0:0.13,x1:0.43,x2:0.57,x3:0.87},
