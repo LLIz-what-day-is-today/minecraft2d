@@ -44,7 +44,7 @@ const CACHE_KEY='mc2d_tex_cache_v10',CACHE_DURATION=24*60*60*1000;
 const ANIMAL_MAX=12,ANIMAL_SPAWN_INTERVAL=300,ANIMAL_SPAWN_RADIUS=24;
 const MONSTER_MAX=10,MONSTER_SPAWN_INTERVAL=400,MONSTER_SPAWN_RADIUS=32;
 const ATTACK_RANGE=TILE*5;
-const BLOCK_REACH=5; /* 方块交互距离限制（格） */
+const BLOCK_REACH=5;
 let gameState='loading',showInGameMenu=false,showOptionsMenu=false,showNameEditor=false;
 let playerName=localStorage.getItem('mc2d_name')||'Steve';
 let nameInputText='',seedInputText='',saveCodeInputText='';
@@ -328,7 +328,7 @@ let playerSkin=null,playerSkinAspect=0.6,heartIcon=null,logoImage=null,loadingBg
 let sheepImage=null,chickenImage=null,zombieImage=null,spiderImage=null;
 let btnNormal=null,btnHover=null,btnDisabled=null;
 let isLoading=true,loadingAlpha=1,loadingStartTime=0,loadTexturesFinished=false;
-const LOADING_FADE_SPEED=0.02,MIN_LOADING_TIME=600;
+const LOADING_FADE_SPEED=0.02;
 const FULLSCREEN_BTN={x:15,y:0,w:80,h:30};
 const uiProgress={inventory:0,crafting:0,furnace:0,chest:0};
 const UI_ANIM_SPEED=0.16,SLOT_SIZE=40,SLOT_GAP=2;
@@ -435,7 +435,6 @@ function loadTextures(callback){
     if(loadTexturesFinished)return;
     if(loaded>=total){loadTexturesFinished=true;buildItemIcons();try{localStorage.setItem(CACHE_KEY,Date.now().toString());}catch(e){}callback();}
   }
-  setTimeout(()=>{if(!loadTexturesFinished){loadTexturesFinished=true;buildItemIcons();try{localStorage.setItem(CACHE_KEY,Date.now().toString());}catch(e){}callback();}},10000);
   urlTypes.forEach(type=>{
     const img=new Image();img.crossOrigin='anonymous';
     img.onload=function(){
@@ -2116,17 +2115,41 @@ function updateAnimalSpawning(){
 function updateFallingBlocks(){
   for(let i=fallingBlocks.length-1;i>=0;i--){
     const fb=fallingBlocks[i];
-    fb.vy+=GRAVITY*0.8;fb.y+=fb.vy;
-    const col=Math.floor(fb.x/TILE),row=Math.floor((fb.y+TILE/2)/TILE);
-    if(row>=0&&row<CHUNK_H){
-      const below=getBlock(col,row);
+    fb.vy=Math.min(fb.vy+GRAVITY*0.8,14);
+    fb.y+=fb.vy;
+    const col=Math.floor(fb.x/TILE);
+    const bottomRow=Math.floor((fb.y+TILE-0.01)/TILE);
+    if(bottomRow>=0&&bottomRow<CHUNK_H){
+      const below=getBlock(col,bottomRow);
       if(below!==BLOCK.AIR&&below!==BLOCK.GLASS){
-        if(below===BLOCK.TORCH||below===BLOCK.LADDER||below===BLOCK.SAPLING)spawnDrop(col,row-1,BLOCK_TO_ITEM[fb.type]||fb.type,1);
-        else setBlock(col,row-1,fb.type);
+        if(below===BLOCK.TORCH||below===BLOCK.LADDER||below===BLOCK.SAPLING)
+          spawnDrop(col,bottomRow-1,BLOCK_TO_ITEM[fb.type]||fb.type,1);
+        else
+          setBlock(col,bottomRow-1,fb.type);
         fallingBlocks.splice(i,1);
+        continue;
       }
     }
     if(fb.y>CHUNK_H*TILE+100)fallingBlocks.splice(i,1);
+  }
+}
+let gravelCheckTimer=0;
+function updateGravelPhysics(){
+  gravelCheckTimer++;
+  if(gravelCheckTimer<6)return;
+  gravelCheckTimer=0;
+  const px=Math.floor((player.x+player.w/2)/TILE);
+  const range=24;
+  for(let c=px-range;c<=px+range;c++){
+    for(let r=CHUNK_H-2;r>=1;r--){
+      const b=getBlock(c,r);
+      if(b!==BLOCK.SAND&&b!==BLOCK.GRAVEL)continue;
+      const below=getBlock(c,r+1);
+      if(below===BLOCK.AIR||below===BLOCK.TORCH||below===BLOCK.LADDER||below===BLOCK.SAPLING){
+        setBlock(c,r,BLOCK.AIR);
+        fallingBlocks.push({x:c*TILE+TILE/2,y:r*TILE,vy:0,type:b});
+      }
+    }
   }
 }
 function updateSaplings(){
@@ -2338,6 +2361,15 @@ function drawDrops(){
       const tx=sx+DROP_SIZE/2-2,ty=sy+DROP_SIZE/2-2;
       ctx.strokeText(d.count,tx,ty);ctx.fillText(d.count,tx,ty);
     }
+  }
+}
+function drawFallingBlocks(){
+  for(const fb of fallingBlocks){
+    const sx=fb.x-camera.x-TILE/2,sy=fb.y-camera.y;
+    if(sx<-TILE||sx>canvas.width||sy<-TILE||sy>canvas.height+TILE)continue;
+    const img=tileCanvasCache[fb.type];
+    if(img)ctx.drawImage(img,sx,sy,TILE,TILE);
+    else{ctx.fillStyle='#888';ctx.fillRect(sx,sy,TILE,TILE);}
   }
 }
 function drawAnimals(){
@@ -2817,9 +2849,10 @@ function drawLoadingScreen(){
     ctx.imageSmoothingEnabled=true;ctx.drawImage(loadingBgImage,dX,dY,dW,dH);
   }else{ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);}
   ctx.fillStyle='rgba(0,0,0,0.25)';ctx.fillRect(0,0,canvas.width,canvas.height);
+  const elapsed=Math.floor((Date.now()-loadingStartTime)/1000);
   if(loadingPhase==='download'){
     ctx.fillStyle='#fff';ctx.font='bold 24px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText('download file...',canvas.width/2,canvas.height/2-30);
+    ctx.fillText('download file... ('+elapsed+'s)',canvas.width/2,canvas.height/2-30);
     const bw=300,bh=20;
     const bx=(canvas.width-bw)/2,by=canvas.height/2+10;
     ctx.fillStyle='rgba(255,255,255,0.2)';ctx.fillRect(bx,by,bw,bh);
@@ -2829,7 +2862,7 @@ function drawLoadingScreen(){
     ctx.fillText(downloadProgress+' / '+downloadTotal,canvas.width/2,by+bh+20);
   }else{
     ctx.fillStyle='#fff';ctx.font='bold 28px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText('please wait...',canvas.width/2,canvas.height/2);
+    ctx.fillText('please wait... ('+elapsed+'s)',canvas.width/2,canvas.height/2);
   }
 }
 function drawHUD(){
@@ -2858,6 +2891,7 @@ function drawLog(){
     '光圈大小: '+Math.round(touchRippleSize)+'px',
     'GUI滚动: '+Math.round(guiScrollOffset)+'/'+guiScrollMax,
     '方块交互距离: '+BLOCK_REACH+'格',
+    '下落方块: '+fallingBlocks.length,
     '','按 Shift+Enter+F3 关闭日志'];
   const w=320,h=logLines.length*lineHeight+padding*2;
   const x=10,y=10;
@@ -3062,13 +3096,13 @@ function gameLoop(){
   uiProgress.chest+=((showChest?1:0)-uiProgress.chest)*UI_ANIM_SPEED;
   updateSelectorAnim();
   if(!showInGameMenu){
-    updatePhysics();updateDrops();updateFallingBlocks();updateSaplings();
+    updatePhysics();updateDrops();updateFallingBlocks();updateGravelPhysics();updateSaplings();
     updateAnimals();updateAnimalSpawning();updateMonsters();updateMonsterSpawning();updateTime();
   }
   updateCamera();unloadFarChunks();
   drawBackground();drawWorld();
   drawLightOverlay();
-  drawDrops();drawAnimals();drawMonsters();drawPlayer();
+  drawDrops();drawFallingBlocks();drawAnimals();drawMonsters();drawPlayer();
   drawHUD();drawInventoryUI();drawCraftingTableUI();
   drawFurnaceUI();drawChestUI();drawCraftMessage();drawDragging();drawTouchControls();
   drawItemTooltip();
@@ -3089,9 +3123,7 @@ function start(){
   loadingPhase=(cachedTime&&(Date.now()-cachedTime)<CACHE_DURATION)?'wait':'download';
   loadTextures(()=>{
     loadingPhase='wait';
-    const el=Date.now()-loadingStartTime;
-    const rem=Math.max(0,MIN_LOADING_TIME-el);
-    setTimeout(()=>{isLoading=false;gameState='menu';menuSlide=0;},rem);
+    isLoading=false;gameState='menu';menuSlide=0;
   });
   lastFpsTime=Date.now();
   gameLoop();
