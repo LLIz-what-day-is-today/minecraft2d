@@ -40,10 +40,11 @@ const MOVE_SPEED=2.0,RUN_SPEED=4.0,FLY_SPEED=5.0;
 const SPRITE_FACES_RIGHT=false,FONT="Unifont, monospace";
 const PLAYER_W=TILE*0.75,PLAYER_H=TILE*1.8,SNEAK_H=TILE*1.75;
 const DAY_LENGTH=36000;
-const CACHE_KEY='mc2d_tex_cache_v8',CACHE_DURATION=24*60*60*1000;
+const CACHE_KEY='mc2d_tex_cache_v10',CACHE_DURATION=24*60*60*1000;
 const ANIMAL_MAX=12,ANIMAL_SPAWN_INTERVAL=300,ANIMAL_SPAWN_RADIUS=24;
 const MONSTER_MAX=10,MONSTER_SPAWN_INTERVAL=400,MONSTER_SPAWN_RADIUS=32;
 const ATTACK_RANGE=TILE*5;
+const BLOCK_REACH=5; /* 方块交互距离限制（格） */
 let gameState='loading',showInGameMenu=false,showOptionsMenu=false,showNameEditor=false;
 let playerName=localStorage.getItem('mc2d_name')||'Steve';
 let nameInputText='',seedInputText='',saveCodeInputText='';
@@ -192,7 +193,8 @@ const ITEM={
   CHAINMAIL_HELMET:710,CHAINMAIL_CHESTPLATE:711,CHAINMAIL_LEGGINGS:712,CHAINMAIL_BOOTS:713,
   IRON_HELMET:720,IRON_CHESTPLATE:721,IRON_LEGGINGS:722,IRON_BOOTS:723,
   GOLDEN_HELMET:730,GOLDEN_CHESTPLATE:731,GOLDEN_LEGGINGS:732,GOLDEN_BOOTS:733,
-  DIAMOND_HELMET:740,DIAMOND_CHESTPLATE:741,DIAMOND_LEGGINGS:742,DIAMOND_BOOTS:743
+  DIAMOND_HELMET:740,DIAMOND_CHESTPLATE:741,DIAMOND_LEGGINGS:742,DIAMOND_BOOTS:743,
+  IRON_INGOT:800,GOLD_INGOT:801
 };
 
 const ARMOR_COLORS={
@@ -232,6 +234,7 @@ const ITEM_NAMES={
   [ITEM.BLOCK_GRASS]:'草方块',[ITEM.BLOCK_DIRT]:'泥土',[ITEM.BLOCK_STONE]:'石头',[ITEM.BLOCK_LOG]:'原木',[ITEM.BLOCK_LEAVES]:'树叶',[ITEM.BLOCK_PLANKS]:'木板',[ITEM.BLOCK_COBBLE]:'圆石',[ITEM.BLOCK_GLASS]:'玻璃',[ITEM.BLOCK_CRAFTING]:'工作台',[ITEM.BLOCK_FURNACE]:'熔炉',[ITEM.BLOCK_SAND]:'沙子',[ITEM.BLOCK_GRAVEL]:'砂砾',
   [ITEM.COAL]:'煤炭',[ITEM.CHARCOAL]:'木炭',[ITEM.STONE_ITEM]:'石头',[ITEM.RAW_IRON]:'粗铁',[ITEM.RAW_GOLD]:'粗金',[ITEM.DIAMOND]:'钻石',[ITEM.STICK]:'木棍',[ITEM.TORCH]:'火把',[ITEM.DOOR]:'橡木门',[ITEM.LADDER]:'梯子',[ITEM.SAPLING]:'橡树苗',[ITEM.APPLE]:'苹果',[ITEM.BED]:'床',[ITEM.WOOL]:'白色羊毛',[ITEM.RAW_MUTTON]:'生羊肉',[ITEM.COOKED_MUTTON]:'熟羊肉',[ITEM.RAW_CHICKEN]:'生鸡肉',[ITEM.COOKED_CHICKEN]:'熟鸡肉',[ITEM.BLOCK_CHEST]:'箱子',[ITEM.ROTTEN_FLESH]:'腐肉',[ITEM.STRING]:'线',[ITEM.SPIDER_EYE]:'蜘蛛眼',
   [ITEM.WOODEN_SWORD]:'木剑',[ITEM.STONE_SWORD]:'石剑',[ITEM.IRON_SWORD]:'铁剑',[ITEM.GOLDEN_SWORD]:'金剑',[ITEM.DIAMOND_SWORD]:'钻石剑',
+  [ITEM.IRON_INGOT]:'铁锭',[ITEM.GOLD_INGOT]:'金锭',
   ...ARMOR_NAMES
 };
 
@@ -285,6 +288,8 @@ const SPECIAL_ITEM_URLS={
   [ITEM.IRON_SWORD]:'https://zh.minecraft.wiki/images/Iron_Sword_JE2_BE2.png',
   [ITEM.GOLDEN_SWORD]:'https://zh.minecraft.wiki/images/Golden_Sword_JE3_BE2.png',
   [ITEM.DIAMOND_SWORD]:'https://zh.minecraft.wiki/images/Diamond_Sword_JE2_BE2.png',
+  [ITEM.IRON_INGOT]:'https://zh.minecraft.wiki/images/Iron_Ingot_JE3_BE2.png',
+  [ITEM.GOLD_INGOT]:'https://zh.minecraft.wiki/images/Gold_Ingot_JE4_BE2.png?bd10b',
   [ITEM.LEATHER_HELMET]:'https://zh.minecraft.wiki/images/Leather_Cap_JE4_BE3.png',
   [ITEM.LEATHER_CHESTPLATE]:'https://zh.minecraft.wiki/images/Leather_Tunic_JE4_BE3.png',
   [ITEM.LEATHER_LEGGINGS]:'https://zh.minecraft.wiki/images/Leather_Pants_JE4_BE3.png',
@@ -409,6 +414,7 @@ function buildItemIcons(){
     ITEM.BLOCK_GRASS,ITEM.BLOCK_DIRT,ITEM.BLOCK_STONE,ITEM.BLOCK_LOG,ITEM.BLOCK_LEAVES,ITEM.BLOCK_PLANKS,ITEM.BLOCK_COBBLE,ITEM.BLOCK_GLASS,ITEM.BLOCK_CRAFTING,ITEM.BLOCK_FURNACE,ITEM.BLOCK_SAND,ITEM.BLOCK_GRAVEL,
     ITEM.COAL,ITEM.CHARCOAL,ITEM.STONE_ITEM,ITEM.RAW_IRON,ITEM.RAW_GOLD,ITEM.DIAMOND,ITEM.STICK,ITEM.TORCH,ITEM.DOOR,ITEM.LADDER,ITEM.SAPLING,ITEM.APPLE,ITEM.BED,ITEM.WOOL,ITEM.BLOCK_CHEST,ITEM.RAW_MUTTON,ITEM.COOKED_MUTTON,ITEM.RAW_CHICKEN,ITEM.COOKED_CHICKEN,ITEM.ROTTEN_FLESH,ITEM.STRING,ITEM.SPIDER_EYE,
     ITEM.WOODEN_SWORD,ITEM.STONE_SWORD,ITEM.IRON_SWORD,ITEM.GOLDEN_SWORD,ITEM.DIAMOND_SWORD,
+    ITEM.IRON_INGOT,ITEM.GOLD_INGOT,
     ITEM.LEATHER_HELMET,ITEM.LEATHER_CHESTPLATE,ITEM.LEATHER_LEGGINGS,ITEM.LEATHER_BOOTS,
     ITEM.CHAINMAIL_HELMET,ITEM.CHAINMAIL_CHESTPLATE,ITEM.CHAINMAIL_LEGGINGS,ITEM.CHAINMAIL_BOOTS,
     ITEM.IRON_HELMET,ITEM.IRON_CHESTPLATE,ITEM.IRON_LEGGINGS,ITEM.IRON_BOOTS,
@@ -608,17 +614,17 @@ const RECIPES={
     {inputs:[{type:ITEM.STICK,count:1},{type:ITEM.COAL,count:1}],output:{type:ITEM.TORCH,count:3},name:'1 木棍 + 1 煤炭 → 3 火把'},
     {inputs:[{type:ITEM.BLOCK_PLANKS,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.WOODEN_SWORD,count:1},name:'2 木板 + 1 木棍 → 1 木剑'},
     {inputs:[{type:ITEM.BLOCK_COBBLE,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.STONE_SWORD,count:1},name:'2 圆石 + 1 木棍 → 1 石剑'},
-    {inputs:[{type:ITEM.RAW_IRON,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.IRON_SWORD,count:1},name:'2 粗铁 + 1 木棍 → 1 铁剑'},
-    {inputs:[{type:ITEM.RAW_GOLD,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.GOLDEN_SWORD,count:1},name:'2 粗金 + 1 木棍 → 1 金剑'},
+    {inputs:[{type:ITEM.IRON_INGOT,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.IRON_SWORD,count:1},name:'2 铁锭 + 1 木棍 → 1 铁剑'},
+    {inputs:[{type:ITEM.GOLD_INGOT,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.GOLDEN_SWORD,count:1},name:'2 金锭 + 1 木棍 → 1 金剑'},
     {inputs:[{type:ITEM.DIAMOND,count:2},{type:ITEM.STICK,count:1}],output:{type:ITEM.DIAMOND_SWORD,count:1},name:'2 钻石 + 1 木棍 → 1 钻石剑'},
-    {inputs:[{type:ITEM.RAW_IRON,count:5}],output:{type:ITEM.IRON_HELMET,count:1},name:'5 粗铁 → 1 铁头盔'},
-    {inputs:[{type:ITEM.RAW_IRON,count:8}],output:{type:ITEM.IRON_CHESTPLATE,count:1},name:'8 粗铁 → 1 铁胸甲'},
-    {inputs:[{type:ITEM.RAW_IRON,count:7}],output:{type:ITEM.IRON_LEGGINGS,count:1},name:'7 粗铁 → 1 铁护腿'},
-    {inputs:[{type:ITEM.RAW_IRON,count:4}],output:{type:ITEM.IRON_BOOTS,count:1},name:'4 粗铁 → 1 铁靴子'},
-    {inputs:[{type:ITEM.RAW_GOLD,count:5}],output:{type:ITEM.GOLDEN_HELMET,count:1},name:'5 粗金 → 1 金头盔'},
-    {inputs:[{type:ITEM.RAW_GOLD,count:8}],output:{type:ITEM.GOLDEN_CHESTPLATE,count:1},name:'8 粗金 → 1 金胸甲'},
-    {inputs:[{type:ITEM.RAW_GOLD,count:7}],output:{type:ITEM.GOLDEN_LEGGINGS,count:1},name:'7 粗金 → 1 金护腿'},
-    {inputs:[{type:ITEM.RAW_GOLD,count:4}],output:{type:ITEM.GOLDEN_BOOTS,count:1},name:'4 粗金 → 1 金靴子'},
+    {inputs:[{type:ITEM.IRON_INGOT,count:5}],output:{type:ITEM.IRON_HELMET,count:1},name:'5 铁锭 → 1 铁头盔'},
+    {inputs:[{type:ITEM.IRON_INGOT,count:8}],output:{type:ITEM.IRON_CHESTPLATE,count:1},name:'8 铁锭 → 1 铁胸甲'},
+    {inputs:[{type:ITEM.IRON_INGOT,count:7}],output:{type:ITEM.IRON_LEGGINGS,count:1},name:'7 铁锭 → 1 铁护腿'},
+    {inputs:[{type:ITEM.IRON_INGOT,count:4}],output:{type:ITEM.IRON_BOOTS,count:1},name:'4 铁锭 → 1 铁靴子'},
+    {inputs:[{type:ITEM.GOLD_INGOT,count:5}],output:{type:ITEM.GOLDEN_HELMET,count:1},name:'5 金锭 → 1 金头盔'},
+    {inputs:[{type:ITEM.GOLD_INGOT,count:8}],output:{type:ITEM.GOLDEN_CHESTPLATE,count:1},name:'8 金锭 → 1 金胸甲'},
+    {inputs:[{type:ITEM.GOLD_INGOT,count:7}],output:{type:ITEM.GOLDEN_LEGGINGS,count:1},name:'7 金锭 → 1 金护腿'},
+    {inputs:[{type:ITEM.GOLD_INGOT,count:4}],output:{type:ITEM.GOLDEN_BOOTS,count:1},name:'4 金锭 → 1 金靴子'},
     {inputs:[{type:ITEM.DIAMOND,count:5}],output:{type:ITEM.DIAMOND_HELMET,count:1},name:'5 钻石 → 1 钻石头盔'},
     {inputs:[{type:ITEM.DIAMOND,count:8}],output:{type:ITEM.DIAMOND_CHESTPLATE,count:1},name:'8 钻石 → 1 钻石胸甲'},
     {inputs:[{type:ITEM.DIAMOND,count:7}],output:{type:ITEM.DIAMOND_LEGGINGS,count:1},name:'7 钻石 → 1 钻石护腿'},
@@ -626,6 +632,8 @@ const RECIPES={
   furnace:[
     {inputs:[{type:ITEM.BLOCK_COBBLE,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.STONE_ITEM,count:8},name:'8 原石 + 1 煤炭 → 8 石头'},
     {inputs:[{type:ITEM.BLOCK_LOG,count:5}],output:{type:ITEM.COAL,count:3},name:'5 原木 → 3 煤炭'},
+    {inputs:[{type:ITEM.RAW_IRON,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.IRON_INGOT,count:8},name:'8 粗铁 + 1 煤炭 → 8 铁锭'},
+    {inputs:[{type:ITEM.RAW_GOLD,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.GOLD_INGOT,count:8},name:'8 粗金 + 1 煤炭 → 8 金锭'},
     {inputs:[{type:ITEM.RAW_MUTTON,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.COOKED_MUTTON,count:8},name:'8 生羊肉 + 1 煤炭 → 8 熟羊肉'},
     {inputs:[{type:ITEM.RAW_CHICKEN,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.COOKED_CHICKEN,count:8},name:'8 生鸡肉 + 1 煤炭 → 8 熟鸡肉'}]};
 function canCraft(r){for(const i of r.inputs){let h=countItem(i.type);if(i.altType)h+=countItem(i.altType);if(h<i.count)return false;}return true;}
@@ -1333,9 +1341,33 @@ window.addEventListener('resize',resize);
 resize();
 function screenToWorld(mx,my){return {x: camera.x + mx, y: camera.y + my};}
 function isFunctionalBlock(b){return b===BLOCK.CRAFTING||b===BLOCK.FURNACE||b===BLOCK.LIT_FURNACE||b===BLOCK.BED||b===BLOCK.DOOR_LOWER||b===BLOCK.DOOR_UPPER||b===BLOCK.CHEST;}
+function isWithinReach(worldCol,worldRow){
+  const px=Math.floor((player.x+player.w/2)/TILE);
+  const py=Math.floor((player.y+player.h/2)/TILE);
+  const dx=worldCol-px,dy=worldRow-py;
+  return Math.abs(dx)<=BLOCK_REACH&&Math.abs(dy)<=BLOCK_REACH;
+}
+function hasLineOfSight(worldCol,worldRow){
+  const px=player.x+player.w/2,py=player.y+player.h/2;
+  const tx=worldCol*TILE+TILE/2,ty=worldRow*TILE+TILE/2;
+  const steps=Math.max(Math.abs(tx-px),Math.abs(ty-py))/TILE*2;
+  for(let i=1;i<steps;i++){
+    const t=i/steps;
+    const sx=px+(tx-px)*t,sy=py+(ty-py)*t;
+    const bx=Math.floor(sx/TILE),by=Math.floor(sy/TILE);
+    if(bx===worldCol&&by===worldRow)continue;
+    const b=getBlock(bx,by);
+    if(b!==BLOCK.AIR&&b!==BLOCK.GLASS&&b!==BLOCK.TORCH&&b!==BLOCK.LADDER&&b!==BLOCK.SAPLING)return false;
+  }
+  return true;
+}
+function canInteractBlock(worldCol,worldRow){
+  return isWithinReach(worldCol,worldRow)&&hasLineOfSight(worldCol,worldRow);
+}
 function breakBlockAt(worldCol,worldRow){
   const block=getBlock(worldCol,worldRow);
   if(block===BLOCK.AIR||block===BLOCK.BEDROCK||block===BLOCK.DOOR_UPPER)return;
+  if(!canInteractBlock(worldCol,worldRow))return;
   const overlap=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
   if(overlap)return;
   if(block===BLOCK.CHEST){if(showChest&&openChestX===worldCol&&openChestY===worldRow)closeChest();dropChestContents(worldCol,worldRow);}
@@ -1354,6 +1386,7 @@ function dropChestContents(x,y){
   chestData.delete(k);
 }
 function interactFunctionalBlock(worldCol,worldRow){
+  if(!canInteractBlock(worldCol,worldRow))return;
   const block=getBlock(worldCol,worldRow);
   if(block===BLOCK.CRAFTING){showCraftingTable=true;showInventory=false;showFurnace=false;closeChest();resetGuiScroll();}
   else if(block===BLOCK.FURNACE||block===BLOCK.LIT_FURNACE){showFurnace=true;showInventory=false;showCraftingTable=false;closeChest();resetGuiScroll();}
@@ -1366,6 +1399,19 @@ function isInAttackRange(target){
   const tx=target.x+target.w/2,ty=target.y+target.h/2;
   const dx=px-tx,dy=py-ty;
   return (dx*dx+dy*dy)<=ATTACK_RANGE*ATTACK_RANGE;
+}
+function hasLineOfSightEntity(target){
+  const px=player.x+player.w/2,py=player.y+player.h/2;
+  const tx=target.x+target.w/2,ty=target.y+target.h/2;
+  const steps=Math.max(Math.abs(tx-px),Math.abs(ty-py))/TILE*2;
+  for(let i=1;i<steps;i++){
+    const t=i/steps;
+    const sx=px+(tx-px)*t,sy=py+(ty-py)*t;
+    const bx=Math.floor(sx/TILE),by=Math.floor(sy/TILE);
+    const b=getBlock(bx,by);
+    if(b!==BLOCK.AIR&&b!==BLOCK.GLASS&&b!==BLOCK.TORCH&&b!==BLOCK.LADDER&&b!==BLOCK.SAPLING)return false;
+  }
+  return true;
 }
 function getSelectedAttackDamage(){
   const item=inventory[selectedSlot];
@@ -1397,10 +1443,16 @@ function guiRecipeHitTest(mx,my){
 function phoneWorldDown(mx,my){
   const wp=screenToWorld(mx,my);const wx=wp.x, wy=wp.y;
   for(const a of animals){
-    if(wx>=a.x&&wx<=a.x+a.w&&wy>=a.y&&wy<=a.y+a.h){if(!isInAttackRange(a))return;a.health-=getSelectedAttackDamage();playBreakSound();return;}
+    if(wx>=a.x&&wx<=a.x+a.w&&wy>=a.y&&wy<=a.y+a.h){
+      if(!isInAttackRange(a)||!hasLineOfSightEntity(a))return;
+      a.health-=getSelectedAttackDamage();playBreakSound();return;
+    }
   }
   for(const m of monsters){
-    if(wx>=m.x&&wx<=m.x+m.w&&wy>=m.y&&wy<=m.y+m.h){if(!isInAttackRange(m))return;m.health-=getSelectedAttackDamage();m.hurtTimer=10;playBreakSound();return;}
+    if(wx>=m.x&&wx<=m.x+m.w&&wy>=m.y&&wy<=m.y+m.h){
+      if(!isInAttackRange(m)||!hasLineOfSightEntity(m))return;
+      m.health-=getSelectedAttackDamage();m.hurtTimer=10;playBreakSound();return;
+    }
   }
   const worldCol=Math.floor(wx/TILE);const worldRow=Math.floor(wy/TILE);
   const block=getBlock(worldCol,worldRow);
@@ -1409,6 +1461,7 @@ function phoneWorldDown(mx,my){
     if(overlap)return;
     if(block===BLOCK.BEDROCK)return;
     if(block===BLOCK.DOOR_UPPER)return;
+    if(!canInteractBlock(worldCol,worldRow))return;
     if(isFunctionalBlock(block)){
       const touchYInTile=wy-worldRow*TILE;
       if(touchYInTile<TILE/2){breakBlockAt(worldCol,worldRow);}
@@ -1427,6 +1480,7 @@ function phoneWorldDown(mx,my){
     return;
   }
   const pb=ITEM_TO_BLOCK[item.type];if(pb===undefined)return;
+  if(!canInteractBlock(worldCol,worldRow))return;
   if(pb===BLOCK.DOOR_LOWER){
     if(getBlock(worldCol,worldRow-1)!==BLOCK.AIR)return;
     setBlock(worldCol,worldRow,BLOCK.DOOR_LOWER);setBlock(worldCol,worldRow-1,BLOCK.DOOR_UPPER);doorStates.set(worldCol+','+worldRow,false);
@@ -1855,23 +1909,25 @@ canvas.addEventListener('mousedown',e=>{
   if(e.button===0){
     for(const a of animals){
       if(mouseWorldX>=a.x&&mouseWorldX<=a.x+a.w&&mouseWorldY>=a.y&&mouseWorldY<=a.y+a.h){
-        if(!isInAttackRange(a))return;a.health-=getSelectedAttackDamage();playBreakSound();return;
+        if(!isInAttackRange(a)||!hasLineOfSightEntity(a))return;
+        a.health-=getSelectedAttackDamage();playBreakSound();return;
       }
     }
     for(const m of monsters){
       if(mouseWorldX>=m.x&&mouseWorldX<=m.x+m.w&&mouseWorldY>=m.y&&mouseWorldY<=m.y+m.h){
-        if(!isInAttackRange(m))return;m.health-=getSelectedAttackDamage();m.hurtTimer=10;playBreakSound();return;
+        if(!isInAttackRange(m)||!hasLineOfSightEntity(m))return;
+        m.health-=getSelectedAttackDamage();m.hurtTimer=10;playBreakSound();return;
       }
     }
     breakBlockAt(worldCol,worldRow);
   }else if(e.button===2){
     const block=getBlock(worldCol,worldRow);
     const overlap=player.x+player.w>worldCol*TILE&&player.x<worldCol*TILE+TILE&&player.y+player.h>worldRow*TILE&&player.y<worldRow*TILE+TILE;
-    if(block===BLOCK.CRAFTING&&!overlap){showCraftingTable=true;showInventory=false;showFurnace=false;closeChest();resetGuiScroll();return;}
-    if((block===BLOCK.FURNACE||block===BLOCK.LIT_FURNACE)&&!overlap){showFurnace=true;showInventory=false;showCraftingTable=false;closeChest();resetGuiScroll();return;}
-    if(block===BLOCK.CHEST&&!overlap){openChestAt(worldCol,worldRow);return;}
-    if(block===BLOCK.DOOR_LOWER||block===BLOCK.DOOR_UPPER){const key2=getDoorLowerKey(worldCol,worldRow);if(key2){const cur=doorStates.get(key2)===true;doorStates.set(key2,!cur);}return;}
-    if(block===BLOCK.BED){gameTime=0;dayLight=1;isNight=false;player.spawnX=player.x;player.spawnY=player.y;return;}
+    if(block===BLOCK.CRAFTING&&!overlap){if(!canInteractBlock(worldCol,worldRow))return;showCraftingTable=true;showInventory=false;showFurnace=false;closeChest();resetGuiScroll();return;}
+    if((block===BLOCK.FURNACE||block===BLOCK.LIT_FURNACE)&&!overlap){if(!canInteractBlock(worldCol,worldRow))return;showFurnace=true;showInventory=false;showCraftingTable=false;closeChest();resetGuiScroll();return;}
+    if(block===BLOCK.CHEST&&!overlap){if(!canInteractBlock(worldCol,worldRow))return;openChestAt(worldCol,worldRow);return;}
+    if(block===BLOCK.DOOR_LOWER||block===BLOCK.DOOR_UPPER){if(!canInteractBlock(worldCol,worldRow))return;const key2=getDoorLowerKey(worldCol,worldRow);if(key2){const cur=doorStates.get(key2)===true;doorStates.set(key2,!cur);}return;}
+    if(block===BLOCK.BED){if(!canInteractBlock(worldCol,worldRow))return;gameTime=0;dayLight=1;isNight=false;player.spawnX=player.x;player.spawnY=player.y;return;}
     if(block===BLOCK.AIR&&!overlap){
       const item=inventory[selectedSlot];if(!item)return;
       if(item.type===ITEM.APPLE||item.type===ITEM.RAW_MUTTON||item.type===ITEM.COOKED_MUTTON||item.type===ITEM.RAW_CHICKEN||item.type===ITEM.COOKED_CHICKEN||item.type===ITEM.ROTTEN_FLESH){
@@ -1882,6 +1938,7 @@ canvas.addEventListener('mousedown',e=>{
       }
       const pb=ITEM_TO_BLOCK[item.type];
       if(pb!==undefined){
+        if(!canInteractBlock(worldCol,worldRow))return;
         if(pb===BLOCK.DOOR_LOWER){
           if(getBlock(worldCol,worldRow-1)!==BLOCK.AIR)return;
           setBlock(worldCol,worldRow,BLOCK.DOOR_LOWER);setBlock(worldCol,worldRow-1,BLOCK.DOOR_UPPER);doorStates.set(worldCol+','+worldRow,false);
@@ -2800,6 +2857,7 @@ function drawLog(){
     '键盘缩放: '+(virtualKeyboard.scale*100).toFixed(0)+'%',
     '光圈大小: '+Math.round(touchRippleSize)+'px',
     'GUI滚动: '+Math.round(guiScrollOffset)+'/'+guiScrollMax,
+    '方块交互距离: '+BLOCK_REACH+'格',
     '','按 Shift+Enter+F3 关闭日志'];
   const w=320,h=logLines.length*lineHeight+padding*2;
   const x=10,y=10;
