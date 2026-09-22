@@ -40,7 +40,7 @@ const MOVE_SPEED=2.0,RUN_SPEED=4.0,FLY_SPEED=5.0;
 const SPRITE_FACES_RIGHT=false,FONT="Unifont, monospace";
 const PLAYER_W=TILE*0.75,PLAYER_H=TILE*1.8,SNEAK_H=TILE*1.75;
 const DAY_LENGTH=36000;
-const CACHE_KEY='mc2d_tex_cache_v12',CACHE_DURATION=24*60*60*1000;
+const CACHE_KEY='mc2d_tex_cache_v13',CACHE_DURATION=24*60*60*1000;
 const ANIMAL_MAX=16,ANIMAL_SPAWN_INTERVAL=300,ANIMAL_SPAWN_RADIUS=24;
 const MONSTER_MAX=10,MONSTER_SPAWN_INTERVAL=400,MONSTER_SPAWN_RADIUS=32;
 const ATTACK_RANGE=TILE*5;
@@ -500,6 +500,7 @@ function loadTextures(callback){
   types.forEach(type=>{tileCanvasCache[type]=createFallbackTile(type);});
   const urlTypes=types.filter(t=>TEXTURE_URLS[t]);
   let loaded=0;
+  /* 12 张单图：playerSkin/heart/logo/bg/sheep/chicken/zombie/spider/cow/btnNormal/btnHover/btnDisabled */
   const total=urlTypes.length+Object.keys(SPECIAL_ITEM_URLS).length+12;
   downloadTotal=total;downloadProgress=0;
   function checkDone(){
@@ -1675,7 +1676,6 @@ function canInteractBlock(worldCol,worldRow){
   return isWithinReach(worldCol,worldRow)&&hasLineOfSight(worldCol,worldRow);
 }
 
-/* 挖掘进度已删除：按住左键立即破坏方块 */
 let mouseDownLeft=false,mouseDownRight=false;
 function updateMining(){
   if(gameState!=='playing'||showInGameMenu||showInventory||showCraftingTable||showFurnace||showChest)return;
@@ -1709,7 +1709,6 @@ function breakBlockAt(worldCol,worldRow){
     if(Math.random()<0.05)spawnDrop(worldCol,worldRow,ITEM.APPLE,1);
   }else if(block===BLOCK.DOOR_LOWER){setBlock(worldCol,worldRow-1,BLOCK.AIR);spawnDrop(worldCol,worldRow,ITEM.DOOR,1);}
   else if(block===BLOCK.GRAVEL){
-    /* 沙砾：10% 概率掉燧石（此时不再掉沙砾），否则掉沙砾 */
     if(Math.random()<0.10){
       spawnDrop(worldCol,worldRow,ITEM.FLINT,1);
     }else{
