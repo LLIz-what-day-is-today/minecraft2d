@@ -40,7 +40,7 @@ const MOVE_SPEED=2.0,RUN_SPEED=4.0,FLY_SPEED=5.0;
 const SPRITE_FACES_RIGHT=false,FONT="Unifont, monospace";
 const PLAYER_W=TILE*0.75,PLAYER_H=TILE*1.8,SNEAK_H=TILE*1.75;
 const DAY_LENGTH=36000;
-const CACHE_KEY='mc2d_tex_cache_v13',CACHE_DURATION=24*60*60*1000;
+const CACHE_KEY='mc2d_tex_cache_v14',CACHE_DURATION=24*60*60*1000;
 const ANIMAL_MAX=16,ANIMAL_SPAWN_INTERVAL=300,ANIMAL_SPAWN_RADIUS=24;
 const MONSTER_MAX=10,MONSTER_SPAWN_INTERVAL=400,MONSTER_SPAWN_RADIUS=32;
 const ATTACK_RANGE=TILE*5;
@@ -62,9 +62,9 @@ let isSneaking=false,sneakAnim=0;
 let sneakToggle=false;
 let gameTime=0,isNight=false,ctrlPressed=false,dayLight=1;
 let loadingPhase='download',downloadProgress=0,downloadTotal=0,animalSpawnTimer=0,monsterSpawnTimer=0;
+let nextGrassSpread=18000;
 let logVisible=false,frameCount=0,lastFpsTime=0,fps=60;
-let inventoryBarHidden=false;
-let inventoryBarAnim=0;
+let backpackAnim=0;
 const touchActive={};
 let touchButtons={},phoneActiveButton=null;
 const doorStates=new Map();
@@ -500,7 +500,6 @@ function loadTextures(callback){
   types.forEach(type=>{tileCanvasCache[type]=createFallbackTile(type);});
   const urlTypes=types.filter(t=>TEXTURE_URLS[t]);
   let loaded=0;
-  /* 12 张单图：playerSkin/heart/logo/bg/sheep/chicken/zombie/spider/cow/btnNormal/btnHover/btnDisabled */
   const total=urlTypes.length+Object.keys(SPECIAL_ITEM_URLS).length+12;
   downloadTotal=total;downloadProgress=0;
   function checkDone(){
@@ -692,6 +691,7 @@ function getDoorLowerKey(x,y){const b=getBlock(x,y);if(b===BLOCK.DOOR_LOWER)retu
 const player={x:0,y:0,vx:0,vy:0,w:PLAYER_W,h:PLAYER_H,onGround:false,facing:1,creativeMode:false,maxHealth:20,health:20,fallStartY:0,isFalling:false,spawnX:0,spawnY:0};
 
 const INVENTORY_SIZE=36,INV_COLS=9,INV_ROWS=4;
+const HOTBAR_SIZE=9,BACKPACK_SIZE=27,BACKPACK_COLS=9,BACKPACK_ROWS=3;
 let inventory=new Array(INVENTORY_SIZE).fill(null);
 let selectedSlot=0;
 const drops=[],DROP_SIZE=20,DROP_MAX_AGE=6000;
@@ -831,12 +831,42 @@ function getGuiScrollbarRect(R){const sw=10;return{x:R.x+R.w-sw-4,y:R.y+6,w:sw,h
 function pointInRect(px,py,rx,ry,rw,rh){return px>=rx&&px<=rx+rw&&py>=ry&&py<=ry+rh;}
 function getUIOffsetY(p){const e=easeOutCubic(p);return(1-e)*(canvas.height*0.7);}
 
+/* ===== 新的物品栏布局 ===== */
+function getHotbarRect(){
+  const barW=HOTBAR_SIZE*SLOT_SIZE+(HOTBAR_SIZE+1)*SLOT_GAP;
+  const barH=SLOT_SIZE+SLOT_GAP*2;
+  return{x:(canvas.width-barW)/2,y:canvas.height-barH-15,w:barW,h:barH};
+}
+function getHotbarSlotPos(i){
+  const bar=getHotbarRect();
+  return{x:bar.x+SLOT_GAP+i*(SLOT_SIZE+SLOT_GAP),y:bar.y+SLOT_GAP};
+}
+function getBackpackRect(){
+  const gridW=BACKPACK_COLS*SLOT_SIZE+(BACKPACK_COLS+1)*SLOT_GAP;
+  const gridH=BACKPACK_ROWS*SLOT_SIZE+(BACKPACK_ROWS+1)*SLOT_GAP;
+  return{x:20,y:(canvas.height-gridH)/2,w:gridW,h:gridH};
+}
+function getBackpackSlotPos(i){
+  const grid=getBackpackRect();
+  const local=i-HOTBAR_SIZE;
+  const col=local%BACKPACK_COLS,row=Math.floor(local/BACKPACK_COLS);
+  return{x:grid.x+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP),y:grid.y+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP)};
+}
 function getSlotTargetPos(i){
-  const barW=INV_COLS*SLOT_SIZE+(INV_COLS+1)*SLOT_GAP;
-  const barH=INV_ROWS*SLOT_SIZE+(INV_ROWS+1)*SLOT_GAP;
-  const barX=(canvas.width-barW)/2,barY=canvas.height-barH-15;
-  const col=i%INV_COLS,row=Math.floor(i/INV_COLS);
-  return{x:barX+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP),y:barY+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP)};
+  if(i<HOTBAR_SIZE)return getHotbarSlotPos(i);
+  return getBackpackSlotPos(i);
+}
+function isInBackpackGrid(mx,my){
+  if(backpackAnim<0.05)return false;
+  const grid=getBackpackRect();
+  const bar=getArmorBarRect();
+  const slideX=-(1-easeOutCubic(backpackAnim))*(grid.w+40);
+  const ax=mx-slideX;
+  const left=grid.x-8;
+  const right=bar.x+bar.w+8;
+  const top=grid.y-8;
+  const bottom=grid.y+grid.h+8;
+  return ax>=left&&ax<=right&&my>=top&&my<=bottom;
 }
 function updateSelectorAnim(){
   const t=getSlotTargetPos(selectedSlot);
@@ -847,33 +877,41 @@ function updateSelectorAnim(){
     if(Math.abs(t.y-selectorY)<0.3)selectorY=t.y;
   }
 }
-function getInventoryBarRect(){
-  const barW=INV_COLS*SLOT_SIZE+(INV_COLS+1)*SLOT_GAP;
-  const barH=INV_ROWS*SLOT_SIZE+(INV_ROWS+1)*SLOT_GAP;
-  return{x:(canvas.width-barW)/2,y:canvas.height-barH-15,w:barW,h:barH};
-}
 function getArmorBarRect(){
-  const inv=getInventoryBarRect();
+  const grid=getBackpackRect();
   const armorW=SLOT_SIZE;
   const armorH=ARMOR_SLOTS*SLOT_SIZE+(ARMOR_SLOTS+1)*SLOT_GAP;
   const gap=24;
-  return{x:inv.x-gap-armorW,y:inv.y+inv.h-armorH,w:armorW,h:armorH};
+  return{x:grid.x+grid.w+gap,y:grid.y+(grid.h-armorH)/2,w:armorW,h:armorH};
 }
 function getArmorSlotAtPoint(mx,my){
+  if(backpackAnim<0.5)return -1;
+  const grid=getBackpackRect();
+  const slideX=-(1-easeOutCubic(backpackAnim))*(grid.w+40);
   const bar=getArmorBarRect();
+  const abx=bar.x+slideX;
   for(let i=0;i<ARMOR_SLOTS;i++){
     const sy=bar.y+SLOT_GAP+i*(SLOT_SIZE+SLOT_GAP);
-    if(mx>=bar.x&&mx<=bar.x+SLOT_SIZE&&my>=sy&&my<=sy+SLOT_SIZE)return i;
+    if(mx>=abx&&mx<=abx+SLOT_SIZE&&my>=sy&&my<=sy+SLOT_SIZE)return i;
   }
   return -1;
 }
 function getSlotAtPoint(mx,my){
-  const bar=getInventoryBarRect();
-  for(let i=0;i<INVENTORY_SIZE;i++){
-    const col=i%INV_COLS,row=Math.floor(i/INV_COLS);
-    const sx=bar.x+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP);
-    const sy=bar.y+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP);
-    if(mx>=sx&&mx<=sx+SLOT_SIZE&&my>=sy&&my<=sy+SLOT_SIZE)return i;
+  const bar=getHotbarRect();
+  if(mx>=bar.x&&mx<=bar.x+bar.w&&my>=bar.y&&my<=bar.y+bar.h){
+    for(let i=0;i<HOTBAR_SIZE;i++){
+      const p=getHotbarSlotPos(i);
+      if(mx>=p.x&&mx<=p.x+SLOT_SIZE&&my>=p.y&&my<=p.y+SLOT_SIZE)return i;
+    }
+  }
+  if(backpackAnim>0.85){
+    const grid=getBackpackRect();
+    const slideX=-(1-easeOutCubic(backpackAnim))*(grid.w+40);
+    for(let i=HOTBAR_SIZE;i<INVENTORY_SIZE;i++){
+      const p=getBackpackSlotPos(i);
+      const px=p.x+slideX;
+      if(mx>=px&&mx<=px+SLOT_SIZE&&my>=p.y&&my<=p.y+SLOT_SIZE)return i;
+    }
   }
   return -1;
 }
@@ -881,7 +919,7 @@ function getChestArray(x,y){const k=x+','+y;let a=chestData.get(k);if(!a){a=new 
 function getChestBarRect(){
   const w=CHEST_COLS*SLOT_SIZE+(CHEST_COLS+1)*SLOT_GAP;
   const h=CHEST_ROWS*SLOT_SIZE+(CHEST_ROWS+1)*SLOT_GAP+CHEST_TITLE_H;
-  const inv=getInventoryBarRect();
+  const inv=getHotbarRect();
   let y=inv.y-h-16;if(y<0)y=0;
   return{x:(canvas.width-w)/2,y,w,h};
 }
@@ -895,12 +933,12 @@ function getChestSlotIndex(mx,my){
   }
   return -1;
 }
-function isInventoryBarVisible(){return !inventoryBarHidden||showChest;}
 function getSlotRefAtPoint(mx,my){
   const ai=getArmorSlotAtPoint(mx,my);
-  if(ai>=0&&!inventoryBarHidden)return{kind:'armor',index:ai};
+  if(ai>=0)return{kind:'armor',index:ai};
   if(showChest){const ci=getChestSlotIndex(mx,my);if(ci>=0)return{kind:'chest',index:ci};}
-  if(isInventoryBarVisible()){const ii=getSlotAtPoint(mx,my);if(ii>=0)return{kind:'inv',index:ii};}
+  const ii=getSlotAtPoint(mx,my);
+  if(ii>=0)return{kind:'inv',index:ii};
   return null;
 }
 function getSlotArrayAndIndex(ref){
@@ -913,13 +951,20 @@ function getSlotArrayAndIndex(ref){
 function getSlotScreenRect(ref){
   if(!ref)return null;
   if(ref.kind==='inv'){
-    const bar=getInventoryBarRect();
-    const col=ref.index%INV_COLS,row=Math.floor(ref.index/INV_COLS);
-    return{x:bar.x+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP),y:bar.y+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP),w:SLOT_SIZE,h:SLOT_SIZE};
+    if(ref.index<HOTBAR_SIZE){
+      const p=getHotbarSlotPos(ref.index);
+      return{x:p.x,y:p.y,w:SLOT_SIZE,h:SLOT_SIZE};
+    }
+    const grid=getBackpackRect();
+    const slideX=-(1-easeOutCubic(backpackAnim))*(grid.w+40);
+    const p=getBackpackSlotPos(ref.index);
+    return{x:p.x+slideX,y:p.y,w:SLOT_SIZE,h:SLOT_SIZE};
   }
   if(ref.kind==='armor'){
+    const grid=getBackpackRect();
+    const slideX=-(1-easeOutCubic(backpackAnim))*(grid.w+40);
     const bar=getArmorBarRect();
-    return{x:bar.x,y:bar.y+SLOT_GAP+ref.index*(SLOT_SIZE+SLOT_GAP),w:SLOT_SIZE,h:SLOT_SIZE};
+    return{x:bar.x+slideX,y:bar.y+SLOT_GAP+ref.index*(SLOT_SIZE+SLOT_GAP),w:SLOT_SIZE,h:SLOT_SIZE};
   }
   if(ref.kind==='chest'){
     const bar=getChestBarRect();
@@ -1088,6 +1133,7 @@ function resetWorld(seed){
   uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;uiProgress.chest=0;
   gameTime=0;dayLight=1;isNight=false;
   animalSpawnTimer=0;monsterSpawnTimer=0;
+  nextGrassSpread=gameTime+18000;
   for(let i=0;i<4;i++){
     spawnAnimal('sheep',(10+i*6)*TILE,(getSurfaceHeight(10+i*6)-1)*TILE);
     spawnAnimal('chicken',(12+i*6)*TILE,(getSurfaceHeight(12+i*6)-1)*TILE);
@@ -1142,6 +1188,7 @@ function loadSaveCode(code){
   uiProgress.inventory=0;uiProgress.crafting=0;uiProgress.furnace=0;uiProgress.chest=0;
   gameState='playing';menuSlide=0;gameTime=d.time||0;dayLight=1;isNight=false;
   animalSpawnTimer=0;monsterSpawnTimer=0;
+  nextGrassSpread=gameTime+18000;
   for(const key of blockChanges.keys()){
     const[x,y]=key.split(',').map(Number);
     recomputeLightAround(x,y);
@@ -1609,10 +1656,7 @@ document.addEventListener('keydown',e=>{
       if(showInventory||showCraftingTable||showFurnace||showChest){closeChest();cancelSplit();showInventory=false;showCraftingTable=false;showFurnace=false;resetGuiScroll();}
       else{showInventory=true;resetGuiScroll();}
     }
-    if(key==='h'&&!e.repeat){inventoryBarHidden=!inventoryBarHidden;return;}
-    if(e.key>='1'&&e.key<='9'&&!e.repeat){const n=parseInt(e.key)-1;const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=r*INV_COLS+n;}
-    if(key==='z'&&!e.repeat){const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=((r-1+INV_ROWS)%INV_ROWS)*INV_COLS;}
-    if(key==='x'&&!e.repeat){const r=Math.floor(selectedSlot/INV_COLS);selectedSlot=((r+1)%INV_ROWS)*INV_COLS;}
+    if(e.key>='1'&&e.key<='9'&&!e.repeat){selectedSlot=parseInt(e.key)-1;}
     if(key==='shift'&&!e.repeat){sneakToggle=!sneakToggle;return;}
   }
 });
@@ -1906,7 +1950,7 @@ function handleTouchGame(mx,my){
     return;
   }
   if(showInventory||showCraftingTable||showFurnace){
-    if(!isInGuiPanel(mx,my)){
+    if(!isInGuiPanel(mx,my)&&!isInBackpackGrid(mx,my)){
       showInventory=false;showCraftingTable=false;showFurnace=false;
       resetGuiScroll();
     }
@@ -1915,25 +1959,19 @@ function handleTouchGame(mx,my){
   if(showChest){
     const cb=getChestBarRect();
     if(pointInRect(mx,my,cb.x,cb.y,cb.w,cb.h))return;
-    const bar=getInventoryBarRect();
+    const bar=getHotbarRect();
     if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h))return;
-    const ab=getArmorBarRect();
-    if(pointInRect(mx,my,ab.x,ab.y,ab.w,ab.h))return;
+    if(isInBackpackGrid(mx,my))return;
+    if(getArmorSlotAtPoint(mx,my)>=0)return;
     closeChest();
     return;
   }
-  if(!inventoryBarHidden){
-    const bar=getInventoryBarRect();
-    if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
-      const slot=getSlotAtPoint(mx,my);
-      if(slot>=0){selectedSlot=slot;return;}
-    }
-    const ab=getArmorBarRect();
-    if(pointInRect(mx,my,ab.x,ab.y,ab.w,ab.h)){
-      const as=getArmorSlotAtPoint(mx,my);
-      if(as>=0)return;
-    }
+  const bar=getHotbarRect();
+  if(pointInRect(mx,my,bar.x,bar.y,bar.w,bar.h)){
+    const slot=getSlotAtPoint(mx,my);
+    if(slot>=0){selectedSlot=slot;return;}
   }
+  if(getArmorSlotAtPoint(mx,my)>=0)return;
   phoneWorldDown(mx,my);
 }
 function handleTouchMenu(mx,my,ox){
@@ -1981,7 +2019,6 @@ function handlePhoneButtonPress(btnName,touchId){
     else{showInventory=true;showCraftingTable=false;showFurnace=false;closeChest();resetGuiScroll();}
     return;
   }
-  if(btnName==='hideInv'){inventoryBarHidden=!inventoryBarHidden;return;}
   if(btnName==='sneak'||btnName==='down'){sneakToggle=!sneakToggle;return;}
   if(btnName==='left'||btnName==='right'){
     const now=Date.now();
@@ -2022,7 +2059,7 @@ canvas.addEventListener('touchstart',e=>{
       const btnName=hitTestTouchButtons(mx,my);
       if(btnName){
         handlePhoneButtonPress(btnName,t.identifier);
-        if(btnName==='menu'||btnName==='inventory'||btnName==='hideInv'||btnName==='sneak'||btnName==='down'){touchActive[btnName]=false;}
+        if(btnName==='menu'||btnName==='inventory'||btnName==='sneak'||btnName==='down'){touchActive[btnName]=false;}
         continue;
       }
       const ref=getSlotRefAtPoint(mx,my);
@@ -2242,8 +2279,8 @@ window.addEventListener('wheel',e=>{
   if(showChest)return;
   if(document.getElementById('saveOverlay').style.display==='flex')return;
   e.preventDefault();
-  if(e.deltaY>0)selectedSlot=(selectedSlot+1)%INVENTORY_SIZE;
-  else if(e.deltaY<0)selectedSlot=(selectedSlot-1+INVENTORY_SIZE)%INVENTORY_SIZE;
+  if(e.deltaY>0)selectedSlot=(selectedSlot+1)%HOTBAR_SIZE;
+  else if(e.deltaY<0)selectedSlot=(selectedSlot-1+HOTBAR_SIZE)%HOTBAR_SIZE;
 },{passive:false});
 
 canvas.addEventListener('mousedown',e=>{
@@ -2283,7 +2320,7 @@ canvas.addEventListener('mousedown',e=>{
     const btnName=hitTestTouchButtons(mx,my);
     if(btnName){
       handlePhoneButtonPress(btnName);
-      if(btnName==='menu'||btnName==='inventory'||btnName==='hideInv'||btnName==='sneak'||btnName==='down'){touchActive[btnName]=false;phoneActiveButton=null;}
+      if(btnName==='menu'||btnName==='inventory'||btnName==='sneak'||btnName==='down'){touchActive[btnName]=false;phoneActiveButton=null;}
       return;
     }
     handleTouchGame(mx,my);
@@ -2360,6 +2397,7 @@ canvas.addEventListener('mousedown',e=>{
       return;
     }
   }
+  if(showInventory||showCraftingTable||showFurnace||showChest)return;
   const worldCol=Math.floor(mouseWorldX/TILE);
   const worldRow=Math.floor(mouseWorldY/TILE);
   if(e.button===0){
@@ -2759,6 +2797,30 @@ function updateAnimalSpawning(){
       spawnAnimal(type,targetX*TILE,targetY*TILE);
       return;
     }
+  }
+}
+
+/* 草方块蔓延：每 5 分钟（18000 tick）让一格泥土变成草 */
+function updateGrassSpread(){
+  if(gameTime<nextGrassSpread)return;
+  nextGrassSpread=gameTime+18000;
+  const px=Math.floor((player.x+player.w/2)/TILE);
+  const py=Math.floor((player.y+player.h/2)/TILE);
+  const range=40;
+  const candidates=[];
+  for(let c=px-range;c<=px+range;c++){
+    for(let r=py-range;r<=py+range;r++){
+      if(r<1||r>=CHUNK_H-1)continue;
+      if(getBlock(c,r)!==BLOCK.DIRT)continue;
+      if(getBlock(c,r-1)!==BLOCK.AIR)continue;
+      if(getBlock(c-1,r)===BLOCK.GRASS||getBlock(c+1,r)===BLOCK.GRASS||getBlock(c,r+1)===BLOCK.GRASS){
+        candidates.push([c,r]);
+      }
+    }
+  }
+  if(candidates.length>0){
+    const[c,r]=candidates[Math.floor(Math.random()*candidates.length)];
+    setBlock(c,r,BLOCK.GRASS);
   }
 }
 
@@ -3238,52 +3300,96 @@ function drawHealth(){
   }
 }
 
-function drawInventoryBar(){
-  const target=(inventoryBarHidden&&!showChest)?1:0;
-  inventoryBarAnim+=(target-inventoryBarAnim)*0.2;
-  if(inventoryBarAnim>0.99)return;
-  const bar=getInventoryBarRect();
-  const slideY=inventoryBarAnim*(bar.h+30);
-  ctx.save();
-  ctx.translate(0,slideY);
-  ctx.globalAlpha=1-inventoryBarAnim;
+/* ===== 绘制底部快捷栏（9格） ===== */
+function drawHotbar(){
+  const bar=getHotbarRect();
   ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(bar.x,bar.y,bar.w,bar.h);
   ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.lineWidth=2;ctx.strokeRect(bar.x,bar.y,bar.w,bar.h);
-  for(let i=0;i<INVENTORY_SIZE;i++){
-    const col=i%INV_COLS,row=Math.floor(i/INV_COLS);
-    const sx=bar.x+SLOT_GAP+col*(SLOT_SIZE+SLOT_GAP),sy=bar.y+SLOT_GAP+row*(SLOT_SIZE+SLOT_GAP);
-    ctx.fillStyle='rgba(80,80,110,0.4)';ctx.fillRect(sx,sy,SLOT_SIZE,SLOT_SIZE);
-    ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;ctx.strokeRect(sx,sy,SLOT_SIZE,SLOT_SIZE);
+  for(let i=0;i<HOTBAR_SIZE;i++){
+    const p=getHotbarSlotPos(i);
+    ctx.fillStyle='rgba(80,80,110,0.4)';ctx.fillRect(p.x,p.y,SLOT_SIZE,SLOT_SIZE);
+    ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;ctx.strokeRect(p.x,p.y,SLOT_SIZE,SLOT_SIZE);
     const item=inventory[i];
     if(item){
       const img=itemIconCache[item.type];
-      if(img)ctx.drawImage(img,sx+(SLOT_SIZE-32)/2,sy+(SLOT_SIZE-32)/2,32,32);
+      if(img)ctx.drawImage(img,p.x+(SLOT_SIZE-32)/2,p.y+(SLOT_SIZE-32)/2,32,32);
       if(item.durability!==undefined){
         const dw=SLOT_SIZE-8;
         const ratio=item.durability/item.maxDurability;
         ctx.fillStyle='#000';
-        ctx.fillRect(sx+4,sy+SLOT_SIZE-6,dw,3);
+        ctx.fillRect(p.x+4,p.y+SLOT_SIZE-6,dw,3);
         ctx.fillStyle=ratio>0.5?'#3c3':(ratio>0.25?'#cc3':'#c33');
-        ctx.fillRect(sx+4,sy+SLOT_SIZE-6,dw*ratio,3);
+        ctx.fillRect(p.x+4,p.y+SLOT_SIZE-6,dw*ratio,3);
       }
       if(item.count>1){
         ctx.fillStyle='#fff';ctx.font='bold 14px '+FONT;
         ctx.textAlign='right';ctx.textBaseline='bottom';
         ctx.strokeStyle='#000';ctx.lineWidth=3;
-        ctx.strokeText(item.count,sx+SLOT_SIZE-3,sy+SLOT_SIZE-3);
-        ctx.fillText(item.count,sx+SLOT_SIZE-3,sy+SLOT_SIZE-3);
+        ctx.strokeText(item.count,p.x+SLOT_SIZE-3,p.y+SLOT_SIZE-3);
+        ctx.fillText(item.count,p.x+SLOT_SIZE-3,p.y+SLOT_SIZE-3);
       }
     }
   }
-  if(selectorInitialized){
+  if(selectorInitialized && selectedSlot<HOTBAR_SIZE){
+    ctx.strokeStyle='rgba(0,0,0,0.5)';ctx.lineWidth=4;ctx.strokeRect(selectorX+1,selectorY+1,SLOT_SIZE,SLOT_SIZE);
+    ctx.strokeStyle='#ffffff';ctx.lineWidth=3;ctx.strokeRect(selectorX,selectorY,SLOT_SIZE,SLOT_SIZE);
+  }
+
+}
+
+/* ===== 绘制左侧背包（27格，仅在GUI打开时带滑动动画显示） ===== */
+function drawBackpackGrid(){
+  if(backpackAnim<0.005)return;
+  const e=easeOutCubic(backpackAnim);
+  const grid=getBackpackRect();
+  const slideX=-(1-e)*(grid.w+40);
+  ctx.save();
+  ctx.globalAlpha=Math.min(1,e*1.5);
+  ctx.translate(slideX,0);
+  ctx.fillStyle='rgba(30,30,50,0.92)';
+  ctx.fillRect(grid.x-6,grid.y-6,grid.w+12,grid.h+12);
+  ctx.strokeStyle='rgba(138,138,170,0.75)';
+  ctx.lineWidth=2;
+  ctx.strokeRect(grid.x-6,grid.y-6,grid.w+12,grid.h+12);
+  for(let i=HOTBAR_SIZE;i<INVENTORY_SIZE;i++){
+    const p=getBackpackSlotPos(i);
+    ctx.fillStyle='rgba(80,80,110,0.4)';ctx.fillRect(p.x,p.y,SLOT_SIZE,SLOT_SIZE);
+    ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;ctx.strokeRect(p.x,p.y,SLOT_SIZE,SLOT_SIZE);
+    const item=inventory[i];
+    if(item){
+      const img=itemIconCache[item.type];
+      if(img)ctx.drawImage(img,p.x+(SLOT_SIZE-32)/2,p.y+(SLOT_SIZE-32)/2,32,32);
+      if(item.durability!==undefined){
+        const dw=SLOT_SIZE-8;
+        const ratio=item.durability/item.maxDurability;
+        ctx.fillStyle='#000';
+        ctx.fillRect(p.x+4,p.y+SLOT_SIZE-6,dw,3);
+        ctx.fillStyle=ratio>0.5?'#3c3':(ratio>0.25?'#cc3':'#c33');
+        ctx.fillRect(p.x+4,p.y+SLOT_SIZE-6,dw*ratio,3);
+      }
+      if(item.count>1){
+        ctx.fillStyle='#fff';ctx.font='bold 14px '+FONT;
+        ctx.textAlign='right';ctx.textBaseline='bottom';
+        ctx.strokeStyle='#000';ctx.lineWidth=3;
+        ctx.strokeText(item.count,p.x+SLOT_SIZE-3,p.y+SLOT_SIZE-3);
+        ctx.fillText(item.count,p.x+SLOT_SIZE-3,p.y+SLOT_SIZE-3);
+      }
+    }
+  }
+  if(selectorInitialized && selectedSlot>=HOTBAR_SIZE){
     ctx.strokeStyle='rgba(0,0,0,0.5)';ctx.lineWidth=4;ctx.strokeRect(selectorX+1,selectorY+1,SLOT_SIZE,SLOT_SIZE);
     ctx.strokeStyle='#ffffff';ctx.lineWidth=3;ctx.strokeRect(selectorX,selectorY,SLOT_SIZE,SLOT_SIZE);
   }
   const ab=getArmorBarRect();
+  ctx.fillStyle='rgba(30,30,50,0.92)';
+  ctx.fillRect(ab.x-6,ab.y-6,ab.w+12,ab.h+12);
+  ctx.strokeStyle='rgba(138,138,170,0.75)';
+  ctx.lineWidth=2;
+  ctx.strokeRect(ab.x-6,ab.y-6,ab.w+12,ab.h+12);
   for(let i=0;i<ARMOR_SLOTS;i++){
     const sy=ab.y+SLOT_GAP+i*(SLOT_SIZE+SLOT_GAP);
-    ctx.fillStyle='rgba(60,60,90,0.55)';ctx.fillRect(ab.x,sy,SLOT_SIZE,SLOT_SIZE);
-    ctx.strokeStyle='rgba(180,180,220,0.5)';ctx.lineWidth=1;ctx.strokeRect(ab.x,sy,SLOT_SIZE,SLOT_SIZE);
+    ctx.fillStyle='rgba(80,80,110,0.4)';ctx.fillRect(ab.x,sy,SLOT_SIZE,SLOT_SIZE);
+    ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;ctx.strokeRect(ab.x,sy,SLOT_SIZE,SLOT_SIZE);
     const item=armorInventory[i];
     if(item){
       const img=itemIconCache[item.type];
@@ -3337,7 +3443,6 @@ function drawItemTooltip(){
   if(gameState!=='playing')return;
   if(phoneMode)return;
   if(showInGameMenu||showInventory||showCraftingTable||showFurnace)return;
-  if(inventoryBarHidden&&!showChest)return;
   const slot=getSlotAtPoint(mouseX,mouseY);
   if(slot<0){
     const as=getArmorSlotAtPoint(mouseX,mouseY);
@@ -3544,7 +3649,6 @@ function drawTouchControls(){
     sneak:{x:midX-size/2,y:padY+size,w:size,h:size},
     jump:{x:canvas.width-90,y:canvas.height-140,w:70,h:70},
     inventory:{x:canvas.width-90,y:canvas.height-230,w:70,h:70},
-    hideInv:{x:canvas.width-180,y:canvas.height-230,w:70,h:70},
     menu:{x:canvas.width/2-30,y:20,w:60,h:60}
   };
   ctx.save();
@@ -3554,7 +3658,6 @@ function drawTouchControls(){
     if(name==='up')active=active||touchActive['jump'];
     if(name==='down')active=active||touchActive['sneak'];
     if(name==='inventory')active=showInventory;
-    if(name==='hideInv')active=inventoryBarHidden;
     if(name==='sneak'||name==='down')active=sneakToggle;
     ctx.globalAlpha=active?0.75:0.45;
     ctx.fillStyle=active?'#fff':'#000';
@@ -3571,7 +3674,6 @@ function drawTouchControls(){
     else if(name==='up')sym='▲';else if(name==='down')sym='▼';
     else if(name==='jump')sym='⬆';else if(name==='sneak')sym='⬇';
     else if(name==='inventory')sym='包';
-    else if(name==='hideInv')sym='↕';
     else if(name==='menu')sym='三';
     ctx.fillText(sym,btn.x+btn.w/2,btn.y+btn.h/2);
   }
@@ -3593,7 +3695,7 @@ function drawLoadingScreen(){
 }
 
 function drawHUD(){
-  drawHealth();drawInventoryBar();drawFullscreenTip();
+  drawHealth();drawHotbar();drawFullscreenTip();
   drawLogoStatic(canvas.width-120-15,40,120);
   ctx.fillStyle='rgba(255,255,255,0.85)';ctx.font='14px '+FONT;ctx.textAlign='right';ctx.textBaseline='top';
   const hourFloat=(12+(gameTime/DAY_LENGTH)*24)%24;
@@ -3620,6 +3722,7 @@ function drawLog(){
     '方块交互距离: '+BLOCK_REACH+'格',
     '下落方块: '+fallingBlocks.length,
     '箭矢: '+arrows.length,
+    '下次草蔓延: '+Math.max(0,nextGrassSpread-gameTime)+' tick',
     '','按 Shift+Enter+F3 关闭日志'];
   const w=320,h=logLines.length*lineHeight+padding*2;
   const x=10,y=10;
@@ -3860,6 +3963,8 @@ function gameLoop(){
   }
   if(splitMode){const elapsed=Date.now()-splitMode.startTime;splitMode.progress=Math.min(100,elapsed/SPLIT_MAX_MS*100);}
   for(const[id,r]of touchRipples){if(r.fading){r.alpha-=0.05;if(r.alpha<=0)touchRipples.delete(id);}}
+  const backpackTarget=(showInventory||showCraftingTable||showFurnace||showChest)?1:0;
+  backpackAnim+=(backpackTarget-backpackAnim)*UI_ANIM_SPEED;
   uiProgress.inventory+=((showInventory?1:0)-uiProgress.inventory)*UI_ANIM_SPEED;
   uiProgress.crafting+=((showCraftingTable?1:0)-uiProgress.crafting)*UI_ANIM_SPEED;
   uiProgress.furnace+=((showFurnace?1:0)-uiProgress.furnace)*UI_ANIM_SPEED;
@@ -3868,14 +3973,14 @@ function gameLoop(){
   if(!showInGameMenu){
     updatePhysics();updateDrops();updateFallingBlocks();updateGravelPhysics();updateSaplings();
     updateAnimals();updateAnimalSpawning();updateMonsters();updateMonsterSpawning();
-    updateArrows();updateMining();updateTime();
+    updateArrows();updateMining();updateTime();updateGrassSpread();
   }
   updateCamera();unloadFarChunks();
   drawBackground();drawWorld();
   drawLightOverlay();
   drawDrops();drawFallingBlocks();drawArrows();drawAnimals();drawMonsters();drawPlayer();
   drawHUD();drawInventoryUI();drawCraftingTableUI();
-  drawFurnaceUI();drawChestUI();drawCraftMessage();drawDragging();drawTouchControls();
+  drawFurnaceUI();drawChestUI();drawBackpackGrid();drawCraftMessage();drawDragging();drawTouchControls();
   drawItemTooltip();
   drawTouchRipples();
   drawSplitBar();
