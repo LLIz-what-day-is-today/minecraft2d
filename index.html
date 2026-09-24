@@ -40,13 +40,15 @@ const MOVE_SPEED=2.0,RUN_SPEED=4.0,FLY_SPEED=5.0;
 const SPRITE_FACES_RIGHT=false,FONT="Unifont, monospace";
 const PLAYER_W=TILE*0.75,PLAYER_H=TILE*1.8,SNEAK_H=TILE*1.75;
 const DAY_LENGTH=36000;
-const CACHE_KEY='mc2d_tex_cache_v14',CACHE_DURATION=24*60*60*1000;
+const CACHE_KEY='mc2d_tex_cache_v15',CACHE_DURATION=24*60*60*1000;
 const ANIMAL_MAX=16,ANIMAL_SPAWN_INTERVAL=300,ANIMAL_SPAWN_RADIUS=24;
 const MONSTER_MAX=10,MONSTER_SPAWN_INTERVAL=400,MONSTER_SPAWN_RADIUS=32;
 const ATTACK_RANGE=TILE*5;
 const BLOCK_REACH=5;
 const LOADING_IMAGE_URL='https://cdn.jsdelivr.net/gh/LLIz-what-day-is-today/LL.s_pictures@main/123.PNG';
 const NEW_MOB_FLIP=true;
+const RENDER_SCALE_MIN=0.5,RENDER_SCALE_MAX=2.5,RENDER_SCALE_DEFAULT=1.0;
+const SKELETON_ARROW_SPEED=16;
 
 let gameState='loading',showInGameMenu=false,showOptionsMenu=false,showNameEditor=false;
 let playerName=localStorage.getItem('mc2d_name')||'Steve';
@@ -58,6 +60,11 @@ if(localStorage.getItem('mc2d_phone')===null){
   const isTouch=('ontouchstart' in window)||(navigator.maxTouchPoints>0);
   if(isTouch){phoneMode=true;try{localStorage.setItem('mc2d_phone','1');}catch(e){}}
 }
+let renderScale=(function(){
+  const v=parseFloat(localStorage.getItem('mc2d_render_scale'));
+  if(isNaN(v)||v<RENDER_SCALE_MIN||v>RENDER_SCALE_MAX)return RENDER_SCALE_DEFAULT;
+  return v;
+})();
 let isSneaking=false,sneakAnim=0;
 let sneakToggle=false;
 let gameTime=0,isNight=false,ctrlPressed=false,dayLight=1;
@@ -106,6 +113,8 @@ let touchRippleSize=(function(){
 })();
 let optionsSliderDragging=false;
 let optionsSliderTouchId=null;
+let renderSliderDragging=false;
+let renderSliderTouchId=null;
 let lastLeftTapTime=0;
 let lastRightTapTime=0;
 const DOUBLE_TAP_MS=300;
@@ -377,13 +386,14 @@ const CHICKEN_URL='https://zh.minecraft.wiki/images/thumb/Chicken_JE2_BE2.png/10
 const ZOMBIE_URL='https://zh.minecraft.wiki/images/thumb/Zombie_JE2_BE2.png/150px-Zombie_JE2_BE2.png?b8c7b';
 const SPIDER_URL='https://zh.minecraft.wiki/images/thumb/Spider_JE5_BE4.png/200px-Spider_JE5_BE4.png?6206b';
 const COW_URL='https://zh.minecraft.wiki/images/thumb/Cow_JE7_BE3.png/150px-Cow_JE7_BE3.png?682ef';
+const SKELETON_URL='https://zh.minecraft.wiki/images/thumb/Skeleton_Aiming_JE2_BE3.png/150px-Skeleton_Aiming_JE2_BE3.png?4b008';
 const BTN_NORMAL_URL='https://zh.minecraft.wiki/images/thumb/Java_edition_button.png/150px-Java_edition_button.png?f130c';
 const BTN_HOVER_URL='https://zh.minecraft.wiki/images/thumb/Java_edition_button_highlighted.png/150px-Java_edition_button_highlighted.png?73282';
 const BTN_DISABLED_URL='https://zh.minecraft.wiki/images/thumb/Java_edition_button_disabled.png/150px-Java_edition_button_disabled.png?4e490';
 const tileCanvasCache={},itemIconCache={};
 let playerSkin=null,playerSkinAspect=0.6,heartIcon=null,logoImage=null,loadingBgImage=null,menuBgImage=null;
 let sheepImage=null,chickenImage=null,zombieImage=null,spiderImage=null;
-let cowImage=null;
+let cowImage=null,skeletonImage=null;
 let btnNormal=null,btnHover=null,btnDisabled=null;
 let loadingImage=null,loadingImageLoaded=false;
 (function(){const img=new Image();img.onload=function(){loadingImage=img;loadingImageLoaded=true;};img.src=LOADING_IMAGE_URL;})();
@@ -500,7 +510,8 @@ function loadTextures(callback){
   types.forEach(type=>{tileCanvasCache[type]=createFallbackTile(type);});
   const urlTypes=types.filter(t=>TEXTURE_URLS[t]);
   let loaded=0;
-  const total=urlTypes.length+Object.keys(SPECIAL_ITEM_URLS).length+12;
+  /* 13 张单图 */
+  const total=urlTypes.length+Object.keys(SPECIAL_ITEM_URLS).length+13;
   downloadTotal=total;downloadProgress=0;
   function checkDone(){
     if(loadTexturesFinished)return;
@@ -539,6 +550,7 @@ function loadTextures(callback){
   loadOne(i=>{zombieImage=i;}).src=ZOMBIE_URL;
   loadOne(i=>{spiderImage=i;}).src=SPIDER_URL;
   loadOne(i=>{cowImage=i;}).src=COW_URL;
+  loadOne(i=>{skeletonImage=i;}).src=SKELETON_URL;
   loadOne(i=>{btnNormal=i;}).src=BTN_NORMAL_URL;
   loadOne(i=>{btnHover=i;}).src=BTN_HOVER_URL;
   loadOne(i=>{btnDisabled=i;}).src=BTN_DISABLED_URL;
@@ -831,7 +843,6 @@ function getGuiScrollbarRect(R){const sw=10;return{x:R.x+R.w-sw-4,y:R.y+6,w:sw,h
 function pointInRect(px,py,rx,ry,rw,rh){return px>=rx&&px<=rx+rw&&py>=ry&&py<=ry+rh;}
 function getUIOffsetY(p){const e=easeOutCubic(p);return(1-e)*(canvas.height*0.7);}
 
-/* ===== 新的物品栏布局 ===== */
 function getHotbarRect(){
   const barW=HOTBAR_SIZE*SLOT_SIZE+(HOTBAR_SIZE+1)*SLOT_GAP;
   const barH=SLOT_SIZE+SLOT_GAP*2;
@@ -856,11 +867,15 @@ function getSlotTargetPos(i){
   if(i<HOTBAR_SIZE)return getHotbarSlotPos(i);
   return getBackpackSlotPos(i);
 }
+function getBackpackSlideX(){
+  const grid=getBackpackRect();
+  return -(1-easeOutCubic(backpackAnim))*(grid.w+40);
+}
 function isInBackpackGrid(mx,my){
   if(backpackAnim<0.05)return false;
   const grid=getBackpackRect();
   const bar=getArmorBarRect();
-  const slideX=-(1-easeOutCubic(backpackAnim))*(grid.w+40);
+  const slideX=getBackpackSlideX();
   const ax=mx-slideX;
   const left=grid.x-8;
   const right=bar.x+bar.w+8;
@@ -887,7 +902,7 @@ function getArmorBarRect(){
 function getArmorSlotAtPoint(mx,my){
   if(backpackAnim<0.5)return -1;
   const grid=getBackpackRect();
-  const slideX=-(1-easeOutCubic(backpackAnim))*(grid.w+40);
+  const slideX=getBackpackSlideX();
   const bar=getArmorBarRect();
   const abx=bar.x+slideX;
   for(let i=0;i<ARMOR_SLOTS;i++){
@@ -906,7 +921,7 @@ function getSlotAtPoint(mx,my){
   }
   if(backpackAnim>0.85){
     const grid=getBackpackRect();
-    const slideX=-(1-easeOutCubic(backpackAnim))*(grid.w+40);
+    const slideX=getBackpackSlideX();
     for(let i=HOTBAR_SIZE;i<INVENTORY_SIZE;i++){
       const p=getBackpackSlotPos(i);
       const px=p.x+slideX;
@@ -955,14 +970,12 @@ function getSlotScreenRect(ref){
       const p=getHotbarSlotPos(ref.index);
       return{x:p.x,y:p.y,w:SLOT_SIZE,h:SLOT_SIZE};
     }
-    const grid=getBackpackRect();
-    const slideX=-(1-easeOutCubic(backpackAnim))*(grid.w+40);
+    const slideX=getBackpackSlideX();
     const p=getBackpackSlotPos(ref.index);
     return{x:p.x+slideX,y:p.y,w:SLOT_SIZE,h:SLOT_SIZE};
   }
   if(ref.kind==='armor'){
-    const grid=getBackpackRect();
-    const slideX=-(1-easeOutCubic(backpackAnim))*(grid.w+40);
+    const slideX=getBackpackSlideX();
     const bar=getArmorBarRect();
     return{x:bar.x+slideX,y:bar.y+SLOT_GAP+ref.index*(SLOT_SIZE+SLOT_GAP),w:SLOT_SIZE,h:SLOT_SIZE};
   }
@@ -1217,7 +1230,7 @@ function buildSaveCode(){
   const dr=drops.map(d=>({type:d.type,count:d.count,x:Math.round(d.x),y:Math.round(d.y),vx:d.vx,vy:d.vy,age:d.age}));
   const fb=fallingBlocks.map(f=>({type:f.type,x:Math.round(f.x),y:Math.round(f.y),vy:f.vy}));
   return encodeSave({
-    version:7,seed:worldSeed,name:playerName,
+    version:8,seed:worldSeed,name:playerName,
     x:Math.round(player.x),y:Math.round(player.y),
     health:player.health,selectedSlot,inventory:inv,armor:arm,
     changes:chg,chests:cst,
@@ -1249,11 +1262,21 @@ function getRippleSliderRect(){
   const w=Math.min(320,canvas.width*0.75);
   return{trackX:(canvas.width-w)/2,trackY:canvas.height*0.35+84,trackW:w,trackH:8,touchPadX:26,touchPadY:26};
 }
+function getRenderSliderRect(){
+  const w=Math.min(320,canvas.width*0.75);
+  return{trackX:(canvas.width-w)/2,trackY:canvas.height*0.35+160,trackW:w,trackH:8,touchPadX:26,touchPadY:26};
+}
 function getRippleSizeFromX(mx){
   const r=getRippleSliderRect();
   let t=(mx-r.trackX)/r.trackW;
   t=Math.max(0,Math.min(1,t));
   return RIPPLE_SIZE_MIN+t*(RIPPLE_SIZE_MAX-RIPPLE_SIZE_MIN);
+}
+function getRenderScaleFromX(mx){
+  const r=getRenderSliderRect();
+  let t=(mx-r.trackX)/r.trackW;
+  t=Math.max(0,Math.min(1,t));
+  return RENDER_SCALE_MIN+t*(RENDER_SCALE_MAX-RENDER_SCALE_MIN);
 }
 function beginOptionsSliderDrag(mx,touchId){optionsSliderDragging=true;optionsSliderTouchId=touchId;updateOptionsSliderDrag(mx);}
 function updateOptionsSliderDrag(mx){touchRippleSize=getRippleSizeFromX(mx);}
@@ -1265,6 +1288,19 @@ function handleOptionsSliderStart(mx,my,touchId){
   const r=getRippleSliderRect();
   if(mx>=r.trackX-r.touchPadX&&mx<=r.trackX+r.trackW+r.touchPadX&&my>=r.trackY-r.touchPadY&&my<=r.trackY+r.trackH+r.touchPadY){
     beginOptionsSliderDrag(mx,touchId);return true;
+  }
+  return false;
+}
+function beginRenderSliderDrag(mx,touchId){renderSliderDragging=true;renderSliderTouchId=touchId;updateRenderSliderDrag(mx);}
+function updateRenderSliderDrag(mx){renderScale=getRenderScaleFromX(mx);}
+function endRenderSliderDrag(){
+  if(renderSliderDragging){try{localStorage.setItem('mc2d_render_scale',String(Math.round(renderScale*100)/100));}catch(e){}}
+  renderSliderDragging=false;renderSliderTouchId=null;
+}
+function handleRenderSliderStart(mx,my,touchId){
+  const r=getRenderSliderRect();
+  if(mx>=r.trackX-r.touchPadX&&mx<=r.trackX+r.trackW+r.touchPadX&&my>=r.trackY-r.touchPadY&&my<=r.trackY+r.trackH+r.touchPadY){
+    beginRenderSliderDrag(mx,touchId);return true;
   }
   return false;
 }
@@ -1691,7 +1727,19 @@ function resize(){
 }
 window.addEventListener('resize',resize);
 resize();
-function screenToWorld(mx,my){return{x:camera.x+mx,y:camera.y+my};}
+
+function getViewRect(){
+  const viewW=canvas.width/renderScale;
+  const viewH=canvas.height/renderScale;
+  const viewLeft=camera.x+(canvas.width-viewW)/2;
+  const viewTop=camera.y+(canvas.height-viewH)/2;
+  return{left:viewLeft,top:viewTop,w:viewW,h:viewH};
+}
+function screenToWorld(mx,my){
+  const sx=(mx-canvas.width/2)/renderScale+canvas.width/2;
+  const sy=(my-canvas.height/2)/renderScale+canvas.height/2;
+  return{x:camera.x+sx,y:camera.y+sy};
+}
 
 function isFunctionalBlock(b){
   return b===BLOCK.CRAFTING||b===BLOCK.FURNACE||b===BLOCK.LIT_FURNACE||b===BLOCK.BED||b===BLOCK.DOOR_LOWER||b===BLOCK.DOOR_UPPER||b===BLOCK.CHEST;
@@ -2043,6 +2091,7 @@ canvas.addEventListener('touchstart',e=>{
     if(showOptionsMenu){
       const logicalX=toOptionsLogicalX(mx);
       if(handleOptionsSliderStart(logicalX,my,t.identifier))continue;
+      if(handleRenderSliderStart(logicalX,my,t.identifier))continue;
     }
     if((showInventory||showCraftingTable||showFurnace)&&isInGuiPanel(mx,my)){
       guiScrollDragging=true;guiScrollTouchId=t.identifier;guiScrollStartY=my;
@@ -2090,6 +2139,7 @@ canvas.addEventListener('touchmove',e=>{
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
     if(optionsSliderDragging&&optionsSliderTouchId===t.identifier){updateOptionsSliderDrag(toOptionsLogicalX(mx));continue;}
+    if(renderSliderDragging&&renderSliderTouchId===t.identifier){updateRenderSliderDrag(toOptionsLogicalX(mx));continue;}
     if(guiScrollDragging&&guiScrollTouchId===t.identifier){
       const dy=my-guiScrollStartY;
       if(Math.abs(dy)>6)guiScrollMoved=true;
@@ -2143,6 +2193,7 @@ canvas.addEventListener('touchend',e=>{
     const rect=canvas.getBoundingClientRect();
     const mx=t.clientX-rect.left,my=t.clientY-rect.top;
     if(optionsSliderDragging&&optionsSliderTouchId===t.identifier){endOptionsSliderDrag();}
+    if(renderSliderDragging&&renderSliderTouchId===t.identifier){endRenderSliderDrag();}
     if(guiScrollDragging&&guiScrollTouchId===t.identifier){
       if(!guiScrollMoved){const idx=guiRecipeHitTest(mx,my);if(idx>=0&&guiPanelRecipes)doCraft(guiPanelRecipes[idx]);}
       guiScrollDragging=false;guiScrollTouchId=null;guiScrollMoved=false;
@@ -2169,6 +2220,7 @@ canvas.addEventListener('touchcancel',e=>{
     const r=touchRipples.get(t.identifier);
     if(r)r.fading=true;
     if(optionsSliderDragging&&optionsSliderTouchId===t.identifier){endOptionsSliderDrag();}
+    if(renderSliderDragging&&renderSliderTouchId===t.identifier){endRenderSliderDrag();}
     if(guiScrollDragging&&guiScrollTouchId===t.identifier){guiScrollDragging=false;guiScrollTouchId=null;guiScrollMoved=false;}
     handleKeyboardTouchEnd(t.identifier);
     if(rightEdgeSwipe.active&&rightEdgeSwipe.touchId===t.identifier){rightEdgeSwipe.active=false;rightEdgeSwipe.touchId=null;}
@@ -2230,6 +2282,7 @@ canvas.addEventListener('mousemove',e=>{
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left,my=e.clientY-rect.top;
   if(optionsSliderDragging&&optionsSliderTouchId==='mouse'){updateOptionsSliderDrag(toOptionsLogicalX(mx));return;}
+  if(renderSliderDragging&&renderSliderTouchId==='mouse'){updateRenderSliderDrag(toOptionsLogicalX(mx));return;}
   if(guiScrollDragging&&guiScrollTouchId==='mouse'){
     const dy=my-guiScrollStartY;
     if(Math.abs(dy)>4)guiScrollMoved=true;
@@ -2306,6 +2359,7 @@ canvas.addEventListener('mousedown',e=>{
   if(showOptionsMenu){
     const logicalX=toOptionsLogicalX(mx);
     if(handleOptionsSliderStart(logicalX,my,'mouse'))return;
+    if(handleRenderSliderStart(logicalX,my,'mouse'))return;
   }
   if((showInventory||showCraftingTable||showFurnace)&&isInGuiPanel(mx,my)){
     guiScrollDragging=true;guiScrollTouchId='mouse';guiScrollStartY=my;
@@ -2323,9 +2377,24 @@ canvas.addEventListener('mousedown',e=>{
       if(btnName==='menu'||btnName==='inventory'||btnName==='sneak'||btnName==='down'){touchActive[btnName]=false;phoneActiveButton=null;}
       return;
     }
+    /* 手机模式下鼠标也能拖物品栏（无论 UI 是否打开） */
+    if(e.button===0){
+      const ref0=getSlotRefAtPoint(mx,my);
+      if(ref0){
+        const ai0=getSlotArrayAndIndex(ref0);
+        if(ai0&&ai0.arr[ref0.index]){
+          pressInfo={ref:ref0,startX:mx,startY:my,touchId:undefined,timer:setTimeout(()=>{
+            if(pressInfo&&pressInfo.touchId===undefined){startSplitMode(pressInfo.ref,undefined,pressInfo.startX,pressInfo.startY);pressInfo=null;}
+          },400)};
+        }else{
+          if(ref0.kind==='inv')selectedSlot=ref0.index;
+        }
+        return;
+      }
+    }
     handleTouchGame(mx,my);
     return;
-  }
+}
   if(!showInGameMenu&&!document.fullscreenElement&&gameState==='playing'){
     if(pointInRect(mx,my,FULLSCREEN_BTN.x,FULLSCREEN_BTN.y,FULLSCREEN_BTN.w,FULLSCREEN_BTN.h)){
       document.documentElement.requestFullscreen();return;
@@ -2492,6 +2561,7 @@ canvas.addEventListener('mouseup',e=>{
   if(virtualKeyboard.dragMouse){virtualKeyboard.dragging=false;virtualKeyboard.dragMouse=false;}
   if(virtualKeyboard.sliderDragging&&virtualKeyboard.sliderTouchId==='mouse'){endSliderDrag();}
   if(optionsSliderDragging&&optionsSliderTouchId==='mouse'){endOptionsSliderDrag();}
+  if(renderSliderDragging&&renderSliderTouchId==='mouse'){endRenderSliderDrag();}
   if(guiScrollDragging&&guiScrollTouchId==='mouse'){
     if(!guiScrollMoved){
       const rect2=canvas.getBoundingClientRect();
@@ -2558,26 +2628,17 @@ function fireArrow(){
   if(!hasArrowInInventory())return;
   const t=Math.min(1,bowCharge/1000);
   const speed=6+t*14;
-
   const cx=player.x+player.w/2;
   const cy=player.y+player.h*0.4;
-
   let aimX=mouseWorldX,aimY=mouseWorldY;
-  if(phoneMode){
-    aimX=cx+player.facing*100;
-    aimY=cy;
-  }
-
+  if(phoneMode){aimX=cx+player.facing*100;aimY=cy;}
   let dx=aimX-cx,dy=aimY-cy;
   let d=Math.sqrt(dx*dx+dy*dy);
   if(d<0.001){dx=player.facing;dy=0;d=1;}
   const nx=dx/d,ny=dy/d;
-
   if(!phoneMode)player.facing=nx>=0?1:-1;
-
   const px=cx+nx*12;
   const py=cy+ny*12;
-
   if(!consumeOneArrow())return;
   arrows.push({
     x:px,y:py,
@@ -2589,6 +2650,19 @@ function fireArrow(){
   });
   playThrowSound();
   useDurability(selectedSlot);
+}
+function spawnSkeletonArrow(sx,sy,tx,ty){
+  const dx=tx-sx,dy=ty-sy;
+  const d=Math.sqrt(dx*dx+dy*dy)||1;
+  arrows.push({
+    x:sx,y:sy,
+    vx:dx/d*SKELETON_ARROW_SPEED,
+    vy:dy/d*SKELETON_ARROW_SPEED,
+    damage:4,
+    age:0,
+    owner:'skeleton',
+    homing:true
+  });
 }
 function spawnArrowDrop(px,py){
   drops.push({
@@ -2603,8 +2677,20 @@ function updateArrows(){
     const a=arrows[i];
     a.age++;
     a.x+=a.vx;a.y+=a.vy;
-    a.vy+=GRAVITY*0.25;
-    a.vx*=0.985;a.vy*=0.985;
+    if(a.homing){
+      const px=player.x+player.w/2,py=player.y+player.h*0.4;
+      const dx=px-a.x,dy=py-a.y;
+      const d=Math.sqrt(dx*dx+dy*dy)||1;
+      const tvx=dx/d*SKELETON_ARROW_SPEED;
+      const tvy=dy/d*SKELETON_ARROW_SPEED;
+      a.vx+=(tvx-a.vx)*0.06;
+      a.vy+=(tvy-a.vy)*0.06;
+      const v=Math.sqrt(a.vx*a.vx+a.vy*a.vy);
+      if(v>SKELETON_ARROW_SPEED){a.vx=a.vx/v*SKELETON_ARROW_SPEED;a.vy=a.vy/v*SKELETON_ARROW_SPEED;}
+    }else{
+      a.vy+=GRAVITY*0.25;
+      a.vx*=0.985;a.vy*=0.985;
+    }
     const bx=Math.floor(a.x/TILE),by=Math.floor(a.y/TILE);
     let hitBlock=false;
     if(by>=0&&by<CHUNK_H){
@@ -2623,7 +2709,8 @@ function updateArrows(){
       }
     }else{
       if(a.x>=player.x&&a.x<=player.x+player.w&&a.y>=player.y&&a.y<=player.y+player.h){
-        const dmg=Math.max(1,Math.round(a.damage));
+        const defense=getTotalArmorDefense();
+        const dmg=Math.max(1,Math.round(a.damage*(1-defense*0.04)));
         player.health=Math.max(0,player.health-dmg);
         playHurtSound();
         if(player.health<=0){player.health=player.maxHealth;player.x=player.spawnX;player.y=player.spawnY;player.vy=0;}
@@ -2642,7 +2729,7 @@ function updateArrows(){
       if(a.owner==='player')spawnArrowDrop(a.x,a.y);
       arrows.splice(i,1);continue;
     }
-    if(a.age>200||Math.abs(a.vx)+Math.abs(a.vy)<0.5){
+    if(a.age>240||(!a.homing&&Math.abs(a.vx)+Math.abs(a.vy)<0.5)){
       arrows.splice(i,1);continue;
     }
   }
@@ -2659,6 +2746,8 @@ function spawnMonster(type,x,y){
     monsters.push({type,x,y,vx:0,vy:0,w:TILE*0.75,h:TILE*2,health:20,maxHealth:20,onGround:false,facing:1,attackCooldown:0,hurtTimer:0,burnTimer:0});
   }else if(type==='spider'){
     monsters.push({type,x,y,vx:0,vy:0,w:TILE*1.4,h:TILE*0.9,health:16,maxHealth:16,onGround:false,facing:1,attackCooldown:0,hurtTimer:0,burnTimer:0});
+  }else if(type==='skeleton'){
+    monsters.push({type,x,y,vx:0,vy:0,w:TILE*0.75,h:TILE*2,health:20,maxHealth:20,onGround:false,facing:1,attackCooldown:0,hurtTimer:0,burnTimer:0,shootCooldown:60});
   }
 }
 
@@ -2667,7 +2756,8 @@ function updateMonsters(){
     const m=monsters[i];
     m.attackCooldown=Math.max(0,m.attackCooldown-1);
     if(m.hurtTimer>0)m.hurtTimer--;
-    if(!isNight&&m.type==='zombie'){
+    if(m.shootCooldown>0)m.shootCooldown--;
+    if(!isNight&&(m.type==='zombie'||m.type==='skeleton')){
       const col=Math.floor((m.x+m.w/2)/TILE);
       let exposed=true;
       for(let row=Math.floor(m.y/TILE)-1;row>=0;row--){
@@ -2681,20 +2771,44 @@ function updateMonsters(){
     }else{m.burnTimer=0;}
     const dx=player.x-m.x,dy=player.y-m.y;
     const dist=Math.sqrt(dx*dx+dy*dy);
-    let moveSpeed=m.type==='zombie'?0.5:0.8;
-    if(dist<200&&dist>10){
-      m.vx=Math.sign(dx)*moveSpeed;
-      m.facing=m.vx>0?1:-1;
-    }else{m.vx=0;}
+    let moveSpeed=m.type==='zombie'?0.5:(m.type==='spider'?0.8:0.5);
+    if(m.type==='skeleton'){
+      if(dist<480&&dist>60){
+        m.vx=0;
+        m.facing=dx>0?1:-1;
+        if(m.shootCooldown<=0){
+          spawnSkeletonArrow(m.x+m.w/2,m.y+m.h*0.4,player.x+player.w/2,player.y+player.h*0.4);
+          m.shootCooldown=180;
+        }
+      }else if(dist>10&&dist<300){
+        m.vx=Math.sign(dx)*moveSpeed;
+        m.facing=m.vx>0?1:-1;
+      }else{m.vx=0;}
+    }else{
+      if(dist<280&&dist>10){
+        m.vx=Math.sign(dx)*moveSpeed;
+        m.facing=m.vx>0?1:-1;
+      }else{m.vx=0;}
+    }
     m.x+=m.vx;
     let mblocks=getBlocksInRect(m.x,m.y,m.w,m.h);
-    for(const b of mblocks){if(m.vx>0){m.x=b.col*TILE-m.w;}else if(m.vx<0){m.x=b.col*TILE+TILE;}}
+    let horizontallyBlocked=false;
+    for(const b of mblocks){
+      if(m.vx>0){m.x=b.col*TILE-m.w;horizontallyBlocked=true;}
+      else if(m.vx<0){m.x=b.col*TILE+TILE;horizontallyBlocked=true;}
+    }
+    if(m.type==='spider'&&horizontallyBlocked&&m.vy>=0&&dist<280&&dist>10){
+      m.vy=-5.5;
+    }
+    if((m.type==='zombie'||m.type==='skeleton')&&horizontallyBlocked&&m.onGround&&dist<280&&dist>10){
+      m.vy=-5.5;
+    }
     m.vy=Math.min(m.vy+GRAVITY,12);m.y+=m.vy;
     m.onGround=false;
     mblocks=getBlocksInRect(m.x,m.y,m.w,m.h);
     for(const b of mblocks){if(m.vy>0){m.y=b.row*TILE-m.h;m.vy=0;m.onGround=true;}else if(m.vy<0){m.y=b.row*TILE+TILE;m.vy=0;}}
-    const attackRange=m.type==='zombie'?TILE*0.8:TILE*1.2;
-    if(dist<attackRange&&m.attackCooldown<=0){
+    const attackRange=m.type==='zombie'?TILE*0.8:(m.type==='spider'?TILE*1.2:0);
+    if(m.type!=='skeleton'&&dist<attackRange&&m.attackCooldown<=0){
       const dmg=m.type==='zombie'?3:2;
       const defense=getTotalArmorDefense();
       const reduced=Math.max(1,Math.round(dmg*(1-defense*0.04)));
@@ -2709,6 +2823,11 @@ function updateMonsters(){
       else if(m.type==='spider'){
         spawnDrop(mx,my,ITEM.STRING,1+Math.floor(Math.random()*2));
         if(Math.random()<0.33)spawnDrop(mx,my,ITEM.SPIDER_EYE,1);
+      }else if(m.type==='skeleton'){
+        const arrowCount=Math.floor(Math.random()*4);
+        if(arrowCount>0)spawnDrop(mx,my,ITEM.ARROW,arrowCount);
+        const boneCount=1+Math.floor(Math.random()*3);
+        spawnDrop(mx,my,ITEM.BONE,boneCount);
       }
       monsters.splice(i,1);
     }
@@ -2737,7 +2856,7 @@ function updateMonsterSpawning(){
       if(dx*dx+dy*dy<4*TILE*4*TILE)continue;
       const r=Math.random();
       let type='zombie';
-      if(r<0.5)type='zombie';else type='spider';
+      if(r<0.4)type='zombie';else if(r<0.7)type='spider';else type='skeleton';
       spawnMonster(type,targetX*TILE,targetY*TILE);
       return;
     }
@@ -2754,7 +2873,9 @@ function updateAnimals(){
     if(a.vx!==0)a.facing=a.vx>0?1:-1;
     a.x+=a.vx;
     let ablocks=getBlocksInRect(a.x,a.y,a.w,a.h);
-    for(const b of ablocks){if(a.vx>0){a.x=b.col*TILE-a.w;a.wanderDir=-1;}else if(a.vx<0){a.x=b.col*TILE+TILE;a.wanderDir=1;}}
+    let hitWall=false;
+    for(const b of ablocks){if(a.vx>0){a.x=b.col*TILE-a.w;a.wanderDir=-1;hitWall=true;}else if(a.vx<0){a.x=b.col*TILE+TILE;a.wanderDir=1;hitWall=true;}}
+    if(hitWall&&a.onGround){a.vy=-5;}
     a.vy=Math.min(a.vy+GRAVITY,12);a.y+=a.vy;
     a.onGround=false;
     ablocks=getBlocksInRect(a.x,a.y,a.w,a.h);
@@ -2800,7 +2921,6 @@ function updateAnimalSpawning(){
   }
 }
 
-/* 草方块蔓延：每 5 分钟（18000 tick）让一格泥土变成草 */
 function updateGrassSpread(){
   if(gameTime<nextGrassSpread)return;
   nextGrassSpread=gameTime+18000;
@@ -2824,6 +2944,7 @@ function updateGrassSpread(){
   }
 }
 
+/* 下落方块物理：下方是树苗时，沙子/沙砾直接变成掉落物，避免抖动 */
 function updateFallingBlocks(){
   for(let i=fallingBlocks.length-1;i>=0;i--){
     const fb=fallingBlocks[i];
@@ -2836,7 +2957,8 @@ function updateFallingBlocks(){
       if(below!==BLOCK.AIR&&below!==BLOCK.GLASS){
         const targetRow=bottomRow-1;
         const occupied=getBlock(col,targetRow)!==BLOCK.AIR;
-        if(occupied){
+        /* 下方是树苗或目标格被占据：直接变成掉落物 */
+        if(occupied||below===BLOCK.SAPLING){
           spawnDrop(col,targetRow,BLOCK_TO_ITEM[fb.type]||fb.type,1);
         }else{
           setBlock(col,targetRow,fb.type);
@@ -2849,6 +2971,7 @@ function updateFallingBlocks(){
   }
 }
 let gravelCheckTimer=0;
+/* 沙砾/沙子自然下落检测：树苗不再作为穿透物，避免抖动死循环 */
 function updateGravelPhysics(){
   gravelCheckTimer++;
   if(gravelCheckTimer<6)return;
@@ -2860,7 +2983,7 @@ function updateGravelPhysics(){
       const b=getBlock(c,r);
       if(b!==BLOCK.SAND&&b!==BLOCK.GRAVEL)continue;
       const below=getBlock(c,r+1);
-      if(below===BLOCK.AIR||below===BLOCK.TORCH||below===BLOCK.LADDER||below===BLOCK.SAPLING){
+      if(below===BLOCK.AIR||below===BLOCK.TORCH||below===BLOCK.LADDER){
         setBlock(c,r,BLOCK.AIR);
         fallingBlocks.push({x:c*TILE+TILE/2,y:r*TILE,vy:0,type:b});
       }
@@ -3040,8 +3163,9 @@ function drawBackground(){
 }
 
 function drawWorld(){
-  const sc=Math.floor(camera.x/TILE)-1,ec=Math.ceil((camera.x+canvas.width)/TILE)+1;
-  const sr=Math.max(0,Math.floor(camera.y/TILE)-1),er=Math.min(CHUNK_H-1,Math.ceil((camera.y+canvas.height)/TILE)+1);
+  const view=getViewRect();
+  const sc=Math.floor(view.left/TILE)-1, ec=Math.ceil((view.left+view.w)/TILE)+1;
+  const sr=Math.max(0,Math.floor(view.top/TILE)-1), er=Math.min(CHUNK_H-1,Math.ceil((view.top+view.h)/TILE)+1);
   for(let r=sr;r<=er;r++)for(let c=sc;c<=ec;c++){
     const b=getBlock(c,r);
     if(b===BLOCK.AIR)continue;
@@ -3078,8 +3202,9 @@ function drawWorld(){
   }
 }
 function drawLightOverlay(){
-  const sc=Math.floor(camera.x/TILE)-1,ec=Math.ceil((camera.x+canvas.width)/TILE)+1;
-  const sr=Math.max(0,Math.floor(camera.y/TILE)-1),er=Math.min(CHUNK_H-1,Math.ceil((camera.y+canvas.height)/TILE)+1);
+  const view=getViewRect();
+  const sc=Math.floor(view.left/TILE)-1, ec=Math.ceil((view.left+view.w)/TILE)+1;
+  const sr=Math.max(0,Math.floor(view.top/TILE)-1), er=Math.min(CHUNK_H-1,Math.ceil((view.top+view.h)/TILE)+1);
   const envLight=dayLight*15;
   for(let r=sr;r<=er;r++)for(let c=sc;c<=ec;c++){
     const torchLight=getLight(c,r);
@@ -3147,11 +3272,12 @@ function drawMonsters(){
     let img=null;
     if(m.type==='zombie')img=zombieImage;
     else if(m.type==='spider')img=spiderImage;
+    else if(m.type==='skeleton')img=skeletonImage;
     if(img&&img.complete){
       ctx.save();ctx.imageSmoothingEnabled=false;
       if(m.hurtTimer>0)ctx.globalAlpha=0.6;
       let needFlip;
-      if(m.type==='zombie'){
+      if(m.type==='zombie'||m.type==='skeleton'){
         const iw=img.naturalWidth||1,ih=img.naturalHeight||1;
         const s=Math.min(m.w/iw,m.h/ih);
         const dw=iw*s,dh=ih*s;
@@ -3173,13 +3299,14 @@ function drawMonsters(){
     }else{
       ctx.save();
       if(m.type==='zombie'){ctx.fillStyle='#3a7a3a';ctx.fillRect(sx,sy,m.w,m.h);}
+      else if(m.type==='skeleton'){ctx.fillStyle='#d0d0d0';ctx.fillRect(sx,sy,m.w,m.h);}
       else{ctx.fillStyle='#4a2a2a';ctx.fillRect(sx,sy,m.w,m.h);}
       ctx.restore();
     }
     if(m.health<m.maxHealth){
       const bw=m.w,bh=4,bx=sx,by=sy-8;
       ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(bx-1,by-1,bw+2,bh+2);
-      ctx.fillStyle=m.type==='zombie'?'#4caf50':'#c62828';
+      ctx.fillStyle=m.type==='zombie'?'#4caf50':(m.type==='skeleton'?'#dddddd':'#c62828');
       ctx.fillRect(bx,by,bw*(m.health/m.maxHealth),bh);
     }
   }
@@ -3300,7 +3427,6 @@ function drawHealth(){
   }
 }
 
-/* ===== 绘制底部快捷栏（9格） ===== */
 function drawHotbar(){
   const bar=getHotbarRect();
   ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(bar.x,bar.y,bar.w,bar.h);
@@ -3334,10 +3460,8 @@ function drawHotbar(){
     ctx.strokeStyle='rgba(0,0,0,0.5)';ctx.lineWidth=4;ctx.strokeRect(selectorX+1,selectorY+1,SLOT_SIZE,SLOT_SIZE);
     ctx.strokeStyle='#ffffff';ctx.lineWidth=3;ctx.strokeRect(selectorX,selectorY,SLOT_SIZE,SLOT_SIZE);
   }
-
 }
 
-/* ===== 绘制左侧背包（27格，仅在GUI打开时带滑动动画显示） ===== */
 function drawBackpackGrid(){
   if(backpackAnim<0.005)return;
   const e=easeOutCubic(backpackAnim);
@@ -3380,6 +3504,7 @@ function drawBackpackGrid(){
     ctx.strokeStyle='rgba(0,0,0,0.5)';ctx.lineWidth=4;ctx.strokeRect(selectorX+1,selectorY+1,SLOT_SIZE,SLOT_SIZE);
     ctx.strokeStyle='#ffffff';ctx.lineWidth=3;ctx.strokeRect(selectorX,selectorY,SLOT_SIZE,SLOT_SIZE);
   }
+  /* 护甲栏 */
   const ab=getArmorBarRect();
   ctx.fillStyle='rgba(30,30,50,0.92)';
   ctx.fillRect(ab.x-6,ab.y-6,ab.w+12,ab.h+12);
@@ -3713,6 +3838,7 @@ function drawLog(){
     '坐标: '+Math.floor(player.x/TILE)+', '+Math.floor(player.y/TILE),
     '游戏状态: '+gameState,
     '手机模式: '+(phoneMode?'是':'否'),
+    '渲染大小: '+(renderScale*100).toFixed(0)+'%',
     '背包物品: '+inventory.filter(x=>x).length+'/'+INVENTORY_SIZE,
     '盔甲防御: '+getTotalArmorDefense(),
     '虚拟键盘: '+(virtualKeyboard.visible?'开启':'关闭'),
@@ -3722,6 +3848,7 @@ function drawLog(){
     '方块交互距离: '+BLOCK_REACH+'格',
     '下落方块: '+fallingBlocks.length,
     '箭矢: '+arrows.length,
+    '怪物: '+monsters.length,
     '下次草蔓延: '+Math.max(0,nextGrassSpread-gameTime)+' tick',
     '','按 Shift+Enter+F3 关闭日志'];
   const w=320,h=logLines.length*lineHeight+padding*2;
@@ -3872,6 +3999,20 @@ function drawRippleSizeSlider(){
   ctx.fillText(RIPPLE_SIZE_MIN,r.trackX,r.trackY+r.trackH+6);
   ctx.fillText(RIPPLE_SIZE_MAX,r.trackX+r.trackW,r.trackY+r.trackH+6);
 }
+function drawRenderScaleSlider(){
+  const r=getRenderSliderRect();
+  ctx.fillStyle='#fff';ctx.font='16px '+FONT;ctx.textAlign='center';ctx.textBaseline='bottom';
+  ctx.fillText('渲染大小：'+(renderScale*100).toFixed(0)+'%',canvas.width/2,r.trackY-14);
+  ctx.fillStyle='rgba(30,30,50,0.95)';ctx.fillRect(r.trackX,r.trackY,r.trackW,r.trackH);
+  const t=(renderScale-RENDER_SCALE_MIN)/(RENDER_SCALE_MAX-RENDER_SCALE_MIN);
+  ctx.fillStyle='rgba(90,220,140,0.9)';ctx.fillRect(r.trackX,r.trackY,r.trackW*t,r.trackH);
+  ctx.strokeStyle='rgba(160,200,160,0.85)';ctx.lineWidth=1;ctx.strokeRect(r.trackX+0.5,r.trackY+0.5,r.trackW-1,r.trackH-1);
+  const hx=r.trackX+r.trackW*t;const hy=r.trackY+r.trackH/2;
+  ctx.beginPath();ctx.arc(hx,hy,10,0,Math.PI*2);ctx.fillStyle='#cfd8ff';ctx.fill();ctx.strokeStyle='#5ac07a';ctx.lineWidth=2;ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,0.4)';ctx.font='11px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText((RENDER_SCALE_MIN*100).toFixed(0)+'%',r.trackX,r.trackY+r.trackH+6);
+  ctx.fillText((RENDER_SCALE_MAX*100).toFixed(0)+'%',r.trackX+r.trackW,r.trackY+r.trackH+6);
+}
 function drawOptionsMenu(){
   ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(0,0,canvas.width,canvas.height);
   ctx.fillStyle='#fff';ctx.font='bold 28px '+FONT;ctx.textAlign='center';ctx.textBaseline='top';
@@ -3880,6 +4021,7 @@ function drawOptionsMenu(){
   const pb={x:canvas.width/2-150,y:canvas.height*0.22,w:300,h:44,label,enabled:true};
   drawMenuButton(pb,true);
   drawRippleSizeSlider();
+  drawRenderScaleSlider();
   const bw=200,bh=44;
   DONE_BTN.x=(canvas.width-bw)/2;DONE_BTN.y=canvas.height*0.72;DONE_BTN.w=bw;DONE_BTN.h=bh;
   drawMenuButton({...DONE_BTN,label:'完成',enabled:true},true);
@@ -3917,6 +4059,7 @@ function drawInGameMenu(){
     const pb={x:canvas.width/2-150,y:canvas.height*0.22,w:300,h:44,label,enabled:true};
     drawMenuButton(pb,true);
     drawRippleSizeSlider();
+    drawRenderScaleSlider();
     const bw=200,bh=44;
     DONE_BTN.x=(canvas.width-bw)/2;DONE_BTN.y=canvas.height*0.72;DONE_BTN.w=bw;DONE_BTN.h=bh;
     drawMenuButton({...DONE_BTN,label:'完成',enabled:true},true);
@@ -3976,9 +4119,18 @@ function gameLoop(){
     updateArrows();updateMining();updateTime();updateGrassSpread();
   }
   updateCamera();unloadFarChunks();
-  drawBackground();drawWorld();
+
+  drawBackground();
+
+  ctx.save();
+  ctx.translate(canvas.width/2, canvas.height/2);
+  ctx.scale(renderScale, renderScale);
+  ctx.translate(-canvas.width/2, -canvas.height/2);
+  drawWorld();
   drawLightOverlay();
   drawDrops();drawFallingBlocks();drawArrows();drawAnimals();drawMonsters();drawPlayer();
+  ctx.restore();
+
   drawHUD();drawInventoryUI();drawCraftingTableUI();
   drawFurnaceUI();drawChestUI();drawBackpackGrid();drawCraftMessage();drawDragging();drawTouchControls();
   drawItemTooltip();
