@@ -40,7 +40,7 @@ const MOVE_SPEED=2.0,RUN_SPEED=4.0,FLY_SPEED=5.0;
 const SPRITE_FACES_RIGHT=false,FONT="Unifont, monospace";
 const PLAYER_W=TILE*0.75,PLAYER_H=TILE*1.8,SNEAK_H=TILE*1.75;
 const DAY_LENGTH=36000;
-const CACHE_KEY='mc2d_tex_cache_v15',CACHE_DURATION=24*60*60*1000;
+const CACHE_KEY='mc2d_tex_cache_v17',CACHE_DURATION=24*60*60*1000;
 const ANIMAL_MAX=16,ANIMAL_SPAWN_INTERVAL=300,ANIMAL_SPAWN_RADIUS=24;
 const MONSTER_MAX=10,MONSTER_SPAWN_INTERVAL=400,MONSTER_SPAWN_RADIUS=32;
 const ATTACK_RANGE=TILE*5;
@@ -276,6 +276,7 @@ const BLOCK_TO_ITEM={
 };
 const ITEM_TO_BLOCK={
   [ITEM.BLOCK_GRASS]:BLOCK.GRASS,[ITEM.BLOCK_DIRT]:BLOCK.DIRT,[ITEM.BLOCK_STONE]:BLOCK.STONE,
+  [ITEM.STONE_ITEM]:BLOCK.STONE,
   [ITEM.BLOCK_LOG]:BLOCK.LOG,[ITEM.BLOCK_LEAVES]:BLOCK.LEAVES,[ITEM.BLOCK_PLANKS]:BLOCK.PLANKS,
   [ITEM.BLOCK_COBBLE]:BLOCK.COBBLE,[ITEM.BLOCK_GLASS]:BLOCK.GLASS,[ITEM.BLOCK_CRAFTING]:BLOCK.CRAFTING,
   [ITEM.BLOCK_FURNACE]:BLOCK.FURNACE,[ITEM.BLOCK_SAND]:BLOCK.SAND,[ITEM.BLOCK_GRAVEL]:BLOCK.GRAVEL,
@@ -510,7 +511,6 @@ function loadTextures(callback){
   types.forEach(type=>{tileCanvasCache[type]=createFallbackTile(type);});
   const urlTypes=types.filter(t=>TEXTURE_URLS[t]);
   let loaded=0;
-  /* 13 张单图 */
   const total=urlTypes.length+Object.keys(SPECIAL_ITEM_URLS).length+13;
   downloadTotal=total;downloadProgress=0;
   function checkDone(){
@@ -715,13 +715,25 @@ let mouseWorldX=0,mouseWorldY=0,mouseX=0,mouseY=0;
 
 function countItem(t){let n=0;for(let i=0;i<INVENTORY_SIZE;i++){const it=inventory[i];if(it&&it.type===t)n+=it.count;}return n;}
 function removeItem(t,c){let r=c;for(let i=0;i<INVENTORY_SIZE&&r>0;i++){const it=inventory[i];if(it&&it.type===t){const take=Math.min(it.count,r);it.count-=take;r-=take;if(it.count<=0)inventory[i]=null;}}return r===0;}
+
+/* ===== 原子性放入：空间不足则一个不放 ===== */
 function addItemToInventory(t,c){
+  let space=0;
+  for(let i=0;i<INVENTORY_SIZE;i++){
+    const it=inventory[i];
+    if(!it)space+=64;
+    else if(it.type===t&&it.count<64)space+=64-it.count;
+  }
+  if(space<c)return false;
   let r=c;
   for(let i=0;i<INVENTORY_SIZE&&r>0;i++){const it=inventory[i];if(it&&it.type===t&&it.count<64){const add=Math.min(64-it.count,r);it.count+=add;r-=add;}}
   for(let i=0;i<INVENTORY_SIZE&&r>0;i++){if(!inventory[i]){const add=Math.min(64,r);inventory[i]={type:t,count:add};r-=add;}}
   return r===0;
 }
 function addItemToInventoryWithDur(t,c,dur,maxDur){
+  let empty=0;
+  for(let i=0;i<INVENTORY_SIZE;i++)if(!inventory[i])empty++;
+  if(empty<c)return false;
   let r=c;
   while(r>0){
     let placed=false;
@@ -820,13 +832,19 @@ function doCraft(r){
     if(i.altType){const need=i.count;const hm=countItem(i.type);const tm=Math.min(hm,need);if(tm>0)removeItem(i.type,tm);const rem=need-tm;if(rem>0)removeItem(i.altType,rem);}
     else removeItem(i.type,i.count);
   }
+  let success=false;
   if(r.tool){
     const maxDur=TOOL_DURABILITY[r.output.type]||60;
-    addItemToInventoryWithDur(r.output.type,r.output.count,maxDur,maxDur);
+    success=addItemToInventoryWithDur(r.output.type,r.output.count,maxDur,maxDur);
   }else{
-    addItemToInventory(r.output.type,r.output.count);
+    success=addItemToInventory(r.output.type,r.output.count);
   }
-  setCraftMessage('合成成功：'+r.name);
+  if(success){
+    setCraftMessage('合成成功：'+r.name);
+  }else{
+    throwItemStackToWorld(r.output.type,r.output.count);
+    setCraftMessage('背包已满，物品掉落：'+r.name);
+  }
   return true;
 }
 function getRecipePanelRect(recipes){
@@ -1008,7 +1026,7 @@ function cancelDrag(){
   if(!dragging)return;
   const src=getSlotArrayAndIndex(dragging.ref);
   if(src&&!src.arr[src.idx])src.arr[src.idx]=dragging.item;
-  else addItemToInventory(dragging.item.type,dragging.item.count);
+  else if(!addItemToInventory(dragging.item.type,dragging.item.count))throwItemStackToWorld(dragging.item.type,dragging.item.count);
   dragging=null;
 }
 function throwItemStackToWorld(type,count){
@@ -1061,7 +1079,7 @@ function finishDrag(mx,my){
         else{ti.count=64;item.count=total-64;}
       }else{
         ai.arr[ai.idx]=item;
-        if(ti){if(src)src.arr[src.idx]=ti;else addItemToInventory(ti.type,ti.count);}
+        if(ti){if(src)src.arr[src.idx]=ti;else if(!addItemToInventory(ti.type,ti.count))throwItemStackToWorld(ti.type,ti.count);}
         item=null;
       }
     }
@@ -1202,10 +1220,7 @@ function loadSaveCode(code){
   gameState='playing';menuSlide=0;gameTime=d.time||0;dayLight=1;isNight=false;
   animalSpawnTimer=0;monsterSpawnTimer=0;
   nextGrassSpread=gameTime+18000;
-  for(const key of blockChanges.keys()){
-    const[x,y]=key.split(',').map(Number);
-    recomputeLightAround(x,y);
-  }
+  recomputeLightAround(Math.floor(player.x/TILE), Math.floor(player.y/TILE));
   return true;
 }
 function buildSaveCode(){
@@ -2377,7 +2392,6 @@ canvas.addEventListener('mousedown',e=>{
       if(btnName==='menu'||btnName==='inventory'||btnName==='sneak'||btnName==='down'){touchActive[btnName]=false;phoneActiveButton=null;}
       return;
     }
-    /* 手机模式下鼠标也能拖物品栏（无论 UI 是否打开） */
     if(e.button===0){
       const ref0=getSlotRefAtPoint(mx,my);
       if(ref0){
@@ -2394,7 +2408,7 @@ canvas.addEventListener('mousedown',e=>{
     }
     handleTouchGame(mx,my);
     return;
-}
+  }
   if(!showInGameMenu&&!document.fullscreenElement&&gameState==='playing'){
     if(pointInRect(mx,my,FULLSCREEN_BTN.x,FULLSCREEN_BTN.y,FULLSCREEN_BTN.w,FULLSCREEN_BTN.h)){
       document.documentElement.requestFullscreen();return;
@@ -2710,7 +2724,7 @@ function updateArrows(){
     }else{
       if(a.x>=player.x&&a.x<=player.x+player.w&&a.y>=player.y&&a.y<=player.y+player.h){
         const defense=getTotalArmorDefense();
-        const dmg=Math.max(1,Math.round(a.damage*(1-defense*0.04)));
+        const dmg=Math.max(1,Math.floor(a.damage*(1-defense*0.04)));
         player.health=Math.max(0,player.health-dmg);
         playHurtSound();
         if(player.health<=0){player.health=player.maxHealth;player.x=player.spawnX;player.y=player.spawnY;player.vy=0;}
@@ -2739,7 +2753,7 @@ function spawnDrop(wc,wr,t,c){
   drops.push({x:wc*TILE+TILE/2,y:wr*TILE+TILE/2,vx:(Math.random()-0.5)*2.5,vy:-3-Math.random()*1.5,type:t,count:c||1,age:0,onGround:false,pickupDelay:0});
 }
 function spawnAnimal(type,x,y){
-  animals.push({type,x,y,vx:0,vy:0,w:TILE,h:TILE,health:10,maxHealth:10,onGround:false,facing:1,wanderTimer:0,wanderDir:0,age:0,hurtTimer:0});
+  animals.push({type,x,y,vx:0,vy:0,w:TILE,h:TILE,health:10,maxHealth:10,onGround:false,facing:1,wanderTimer:0,wanderDir:0,age:0,hurtTimer:0,stuckTimer:0});
 }
 function spawnMonster(type,x,y){
   if(type==='zombie'){
@@ -2798,10 +2812,10 @@ function updateMonsters(){
       else if(m.vx<0){m.x=b.col*TILE+TILE;horizontallyBlocked=true;}
     }
     if(m.type==='spider'&&horizontallyBlocked&&m.vy>=0&&dist<280&&dist>10){
-      m.vy=-5.5;
+      m.vy=-6.5;
     }
     if((m.type==='zombie'||m.type==='skeleton')&&horizontallyBlocked&&m.onGround&&dist<280&&dist>10){
-      m.vy=-5.5;
+      m.vy=JUMP_VELOCITY;
     }
     m.vy=Math.min(m.vy+GRAVITY,12);m.y+=m.vy;
     m.onGround=false;
@@ -2811,7 +2825,7 @@ function updateMonsters(){
     if(m.type!=='skeleton'&&dist<attackRange&&m.attackCooldown<=0){
       const dmg=m.type==='zombie'?3:2;
       const defense=getTotalArmorDefense();
-      const reduced=Math.max(1,Math.round(dmg*(1-defense*0.04)));
+      const reduced=Math.max(1,Math.floor(dmg*(1-defense*0.04)));
       player.health=Math.max(0,player.health-reduced);
       m.attackCooldown=40;
       playHurtSound();
@@ -2874,8 +2888,14 @@ function updateAnimals(){
     a.x+=a.vx;
     let ablocks=getBlocksInRect(a.x,a.y,a.w,a.h);
     let hitWall=false;
-    for(const b of ablocks){if(a.vx>0){a.x=b.col*TILE-a.w;a.wanderDir=-1;hitWall=true;}else if(a.vx<0){a.x=b.col*TILE+TILE;a.wanderDir=1;hitWall=true;}}
-    if(hitWall&&a.onGround){a.vy=-5;}
+    for(const b of ablocks){if(a.vx>0){a.x=b.col*TILE-a.w;hitWall=true;}else if(a.vx<0){a.x=b.col*TILE+TILE;hitWall=true;}}
+    if(hitWall){
+      if(a.onGround)a.vy=JUMP_VELOCITY;
+      a.stuckTimer=(a.stuckTimer||0)+1;
+      if(a.stuckTimer>30){a.wanderDir=-a.wanderDir;a.stuckTimer=0;}
+    }else{
+      a.stuckTimer=0;
+    }
     a.vy=Math.min(a.vy+GRAVITY,12);a.y+=a.vy;
     a.onGround=false;
     ablocks=getBlocksInRect(a.x,a.y,a.w,a.h);
@@ -2944,7 +2964,6 @@ function updateGrassSpread(){
   }
 }
 
-/* 下落方块物理：下方是树苗时，沙子/沙砾直接变成掉落物，避免抖动 */
 function updateFallingBlocks(){
   for(let i=fallingBlocks.length-1;i>=0;i--){
     const fb=fallingBlocks[i];
@@ -2957,7 +2976,6 @@ function updateFallingBlocks(){
       if(below!==BLOCK.AIR&&below!==BLOCK.GLASS){
         const targetRow=bottomRow-1;
         const occupied=getBlock(col,targetRow)!==BLOCK.AIR;
-        /* 下方是树苗或目标格被占据：直接变成掉落物 */
         if(occupied||below===BLOCK.SAPLING){
           spawnDrop(col,targetRow,BLOCK_TO_ITEM[fb.type]||fb.type,1);
         }else{
@@ -2971,7 +2989,6 @@ function updateFallingBlocks(){
   }
 }
 let gravelCheckTimer=0;
-/* 沙砾/沙子自然下落检测：树苗不再作为穿透物，避免抖动死循环 */
 function updateGravelPhysics(){
   gravelCheckTimer++;
   if(gravelCheckTimer<6)return;
@@ -3037,7 +3054,12 @@ function updateDrops(){
     if(d.pickupDelay<=0){
       const pr=8;
       if(d.x+DROP_SIZE/2+pr>player.x&&d.x-DROP_SIZE/2-pr<player.x+player.w&&d.y+DROP_SIZE/2+pr>player.y&&d.y-DROP_SIZE/2-pr<player.y+player.h){
-        if(addItemToInventory(d.type,d.count||1)){drops.splice(i,1);continue;}
+        /* 背包满时不捡 */
+        let space=0;
+        for(let k=0;k<INVENTORY_SIZE;k++){const it=inventory[k];if(!it)space+=64;else if(it.type===d.type&&it.count<64)space+=64-it.count;}
+        if(space>=d.count){
+          if(addItemToInventory(d.type,d.count||1)){drops.splice(i,1);continue;}
+        }
       }
     }
     if(d.age>DROP_MAX_AGE)drops.splice(i,1);
