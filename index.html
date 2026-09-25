@@ -2833,9 +2833,9 @@ function updateMonsters(){
     m.onGround=false;
     mblocks=getBlocksInRect(m.x,m.y,m.w,m.h);
     for(const b of mblocks){if(m.vy>0){m.y=b.row*TILE-m.h;m.vy=0;m.onGround=true;}else if(m.vy<0){m.y=b.row*TILE+TILE;m.vy=0;}}
-    const attackRange=m.type==='zombie'?TILE*0.8:(m.type==='spider'?TILE*1.2:0);
-    if(m.type!=='skeleton'&&dist<attackRange&&m.attackCooldown<=0){
-      const dmg=m.type==='zombie'?3:2;
+    const attackRange=m.type==='zombie'?TILE*0.8:(m.type==='spider'?TILE*1.2:(m.type==='skeleton'?TILE*0.8:0));
+    if(dist<attackRange&&m.attackCooldown<=0){
+      const dmg=m.type==='zombie'?3:(m.type==='skeleton'?2:2);
       const defense=getTotalArmorDefense();
       const reduced=Math.max(1,Math.floor(dmg*(1-defense*0.04)));
       player.health=Math.max(0,player.health-reduced);
