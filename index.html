@@ -255,7 +255,7 @@ const ITEM_NAMES={
   [ITEM.GOLDEN_SWORD]:'金剑',[ITEM.DIAMOND_SWORD]:'钻石剑',
   [ITEM.BOW]:'弓',[ITEM.ARROW]:'箭',[ITEM.FEATHER]:'羽毛',[ITEM.FLINT]:'燧石',
   [ITEM.BONE]:'骨头',[ITEM.BONE_MEAL]:'骨粉',[ITEM.LEATHER]:'皮革',
-  [ITEM.RAW_BEEF]:'生牛肉',[ITEM.COOKED_BEEF]:'熟牛肉',
+  [ITEM.RAW_BEEF]:'生牛肉',[ITEM.COOKED_BEEF]:'牛排',
   [ITEM.IRON_INGOT]:'铁锭',[ITEM.GOLD_INGOT]:'金锭',
   [ITEM.BLOCK_COAL]:'煤炭块',[ITEM.BLOCK_IRON]:'铁块',[ITEM.BLOCK_GOLD]:'金块',
   [ITEM.BLOCK_DIAMOND]:'钻石块',[ITEM.BLOCK_BONE]:'骨块',
@@ -352,7 +352,7 @@ const SPECIAL_ITEM_URLS={
   [ITEM.BONE_MEAL]:'https://zh.minecraft.wiki/images/Bone_Meal_JE3_BE3.png?7a9e3',
   [ITEM.LEATHER]:'https://zh.minecraft.wiki/images/Leather_JE2_BE2.png?f5373',
   [ITEM.RAW_BEEF]:'https://zh.minecraft.wiki/images/Invicon_Raw_Beef.png?c6312',
-    [ITEM.COOKED_BEEF]:'https://zh.minecraft.wiki/images/Steak_JE3_BE3.png?0d524',
+  [ITEM.COOKED_BEEF]:'https://zh.minecraft.wiki/images/Steak_JE3_BE3.png?0d524',
   [ITEM.DIAMOND]:'https://zh.minecraft.wiki/images/Diamond_JE3_BE3.png?36a4d',
   [ITEM.IRON_INGOT]:'https://zh.minecraft.wiki/images/Iron_Ingot_JE3_BE2.png',
   [ITEM.GOLD_INGOT]:'https://zh.minecraft.wiki/images/Gold_Ingot_JE4_BE2.png?bd10b',
@@ -817,7 +817,7 @@ const RECIPES={
     {inputs:[{type:ITEM.RAW_GOLD,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.GOLD_INGOT,count:8},name:'8 粗金 + 1 煤炭 → 8 金锭'},
     {inputs:[{type:ITEM.RAW_MUTTON,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.COOKED_MUTTON,count:8},name:'8 生羊肉 + 1 煤炭 → 8 熟羊肉'},
     {inputs:[{type:ITEM.RAW_CHICKEN,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.COOKED_CHICKEN,count:8},name:'8 生鸡肉 + 1 煤炭 → 8 熟鸡肉'},
-    {inputs:[{type:ITEM.RAW_BEEF,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.COOKED_BEEF,count:8},name:'8 生牛肉 + 1 煤炭 → 8 熟牛肉'}]};
+    {inputs:[{type:ITEM.RAW_BEEF,count:8},{type:ITEM.COAL,count:1,altType:ITEM.CHARCOAL}],output:{type:ITEM.COOKED_BEEF,count:8},name:'8 生牛肉 + 1 煤炭 → 8 牛排'}]};
 
 function canCraft(r){
   for(const i of r.inputs){
@@ -847,13 +847,21 @@ function doCraft(r){
   }
   return true;
 }
+
+/* ============ 右侧 UI 布局 ============ */
+function getRecipePanelWidth(){
+  const gridW=BACKPACK_COLS*SLOT_SIZE+(BACKPACK_COLS+1)*SLOT_GAP;
+  const armorW=SLOT_SIZE;
+  const reserved=gridW+armorW+60;
+  return Math.max(180,Math.min(460,canvas.width-reserved));
+}
 function getRecipePanelRect(recipes){
-  const w=Math.min(460,canvas.width-16);
+  const w=getRecipePanelWidth();
   const rowH=46;const rowGap=4;const headerH=50;const footerH=30;
   const contentH=headerH+recipes.length*(rowH+rowGap)+footerH;
   const maxPanelH=Math.max(160,canvas.height-40);
   const h=Math.min(contentH,maxPanelH);
-  const x=(canvas.width-w)/2;
+  const x=Math.max(4,canvas.width-w-16);
   const y=Math.max(20,(canvas.height-h)/2);
   return{x,y,w,h,headerH,footerH,rowH,rowGap,contentH,maxScroll:Math.max(0,contentH-h),recipes};
 }
@@ -873,7 +881,10 @@ function getHotbarSlotPos(i){
 function getBackpackRect(){
   const gridW=BACKPACK_COLS*SLOT_SIZE+(BACKPACK_COLS+1)*SLOT_GAP;
   const gridH=BACKPACK_ROWS*SLOT_SIZE+(BACKPACK_ROWS+1)*SLOT_GAP;
-  return{x:20,y:(canvas.height-gridH)/2,w:gridW,h:gridH};
+  const panelW=getRecipePanelWidth();
+  const panelX=Math.max(4,canvas.width-panelW-16);
+  const x=Math.max(4,panelX-gridW-16);
+  return{x,y:(canvas.height-gridH)/2,w:gridW,h:gridH};
 }
 function getBackpackSlotPos(i){
   const grid=getBackpackRect();
@@ -887,7 +898,7 @@ function getSlotTargetPos(i){
 }
 function getBackpackSlideX(){
   const grid=getBackpackRect();
-  return -(1-easeOutCubic(backpackAnim))*(grid.w+40);
+  return (1-easeOutCubic(backpackAnim))*(canvas.width-grid.x+40);
 }
 function isInBackpackGrid(mx,my){
   if(backpackAnim<0.05)return false;
@@ -895,8 +906,8 @@ function isInBackpackGrid(mx,my){
   const bar=getArmorBarRect();
   const slideX=getBackpackSlideX();
   const ax=mx-slideX;
-  const left=grid.x-8;
-  const right=bar.x+bar.w+8;
+  const left=bar.x-8;
+  const right=grid.x+grid.w+8;
   const top=grid.y-8;
   const bottom=grid.y+grid.h+8;
   return ax>=left&&ax<=right&&my>=top&&my<=bottom;
@@ -915,7 +926,7 @@ function getArmorBarRect(){
   const armorW=SLOT_SIZE;
   const armorH=ARMOR_SLOTS*SLOT_SIZE+(ARMOR_SLOTS+1)*SLOT_GAP;
   const gap=24;
-  return{x:grid.x+grid.w+gap,y:grid.y+(grid.h-armorH)/2,w:armorW,h:armorH};
+  return{x:Math.max(4,grid.x-gap-armorW),y:grid.y+(grid.h-armorH)/2,w:armorW,h:armorH};
 }
 function getArmorSlotAtPoint(mx,my){
   if(backpackAnim<0.5)return -1;
@@ -952,9 +963,11 @@ function getChestArray(x,y){const k=x+','+y;let a=chestData.get(k);if(!a){a=new 
 function getChestBarRect(){
   const w=CHEST_COLS*SLOT_SIZE+(CHEST_COLS+1)*SLOT_GAP;
   const h=CHEST_ROWS*SLOT_SIZE+(CHEST_ROWS+1)*SLOT_GAP+CHEST_TITLE_H;
-  const inv=getHotbarRect();
-  let y=inv.y-h-16;if(y<0)y=0;
-  return{x:(canvas.width-w)/2,y,w,h};
+  const grid=getBackpackRect();
+  const x=grid.x;
+  let y=grid.y-h-16;
+  if(y<4)y=4;
+  return{x,y,w,h};
 }
 function getChestSlotIndex(mx,my){
   const bar=getChestBarRect();
@@ -3488,7 +3501,7 @@ function drawBackpackGrid(){
   if(backpackAnim<0.005)return;
   const e=easeOutCubic(backpackAnim);
   const grid=getBackpackRect();
-  const slideX=-(1-e)*(grid.w+40);
+  const slideX=getBackpackSlideX();
   ctx.save();
   ctx.globalAlpha=Math.min(1,e*1.5);
   ctx.translate(slideX,0);
