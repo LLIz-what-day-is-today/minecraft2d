@@ -2800,17 +2800,16 @@ function updateMonsters(){
     const dist=Math.sqrt(dx*dx+dy*dy);
     let moveSpeed=m.type==='zombie'?0.5:(m.type==='spider'?0.8:0.5);
     if(m.type==='skeleton'){
-      if(dist<480&&dist>60){
-        m.vx=0;
-        m.facing=dx>0?1:-1;
-        if(m.shootCooldown<=0){
-          spawnSkeletonArrow(m.x+m.w/2,m.y+m.h*0.4,player.x+player.w/2,player.y+player.h*0.4);
-          m.shootCooldown=180;
-        }
-      }else if(dist>10&&dist<300){
+      /* 像僵尸一样主动走向玩家 */
+      if(dist<280&&dist>10){
         m.vx=Math.sign(dx)*moveSpeed;
         m.facing=m.vx>0?1:-1;
       }else{m.vx=0;}
+      /* 边走边射箭 */
+      if(dist<480&&dist>60&&m.shootCooldown<=0){
+        spawnSkeletonArrow(m.x+m.w/2,m.y+m.h*0.4,player.x+player.w/2,player.y+player.h*0.4);
+        m.shootCooldown=180;
+      }
     }else{
       if(dist<280&&dist>10){
         m.vx=Math.sign(dx)*moveSpeed;
